@@ -1,5 +1,3 @@
-// pub mod Account;
-
 #[starknet::contract]
 pub mod AccountContract {
     // Constants
