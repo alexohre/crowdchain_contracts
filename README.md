@@ -37,6 +37,48 @@ The Crowdchain Smart Contract is the core technological infrastructure enabling 
 - Contribution limits
 - Milestone verification requirements
 
+### Core Data Structures
+
+#### User
+
+- `address`: ContractAddress - User's wallet address
+- `name`: felt252 - Display name
+- `role`: felt252 - User role ('admin', 'creator', 'donor')
+- `is_creator`: bool - Creator status flag
+- `total_contributed`: u128 - Total contributions made
+- `campaigns_created`: u32 - Number of campaigns created
+- `nfts_owned`: u32 - Number of NFTs owned
+
+#### Campaign
+
+- `id`: u32 - Unique campaign ID
+- `creator`: ContractAddress - Creator's address
+- `title`: felt252 - Campaign title
+- `description`: felt252 - Campaign description
+- `target_amount`: u128 - Funding target
+- `amount_raised`: u128 - Current funds raised
+- `start/end_timestamp`: u64 - Campaign duration
+- `is_active`: bool - Active status
+- `contributors_count`: u32 - Number of contributors
+- `rewards_issued`: bool - NFT rewards status
+
+#### Contribution
+
+- `campaign_id`: u32 - Associated campaign ID
+- `contributor`: ContractAddress - Contributor's address
+- `amount`: u128 - Contribution amount
+- `timestamp`: u64 - Contribution time
+- `reward_tier`: u8 - NFT reward tier (0-3)
+
+#### NFTReward
+
+- `campaign_id`: u32 - Associated campaign ID
+- `recipient`: ContractAddress - Recipient address
+- `token_id`: u128 - NFT token ID
+- `tier`: u8 - Reward tier (1-3)
+- `claimed`: bool - Claim status
+- `metadata_uri`: felt252 - NFT metadata URI
+
 ## 📁 Project Structure
 
 ```
