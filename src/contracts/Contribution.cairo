@@ -92,6 +92,11 @@ pub mod Contribution {
                 i += 1;
             }
             if !found {
+                // Limit top contributors list to max 100 entries
+                if len >= 100 {
+                    // Remove oldest contributor (index 0)
+                    self.top_contributors.remove(0);
+                }
                 self.top_contributors.push(contributor);
             }
 
@@ -149,6 +154,11 @@ pub mod Contribution {
             (amount * fee_rate) / 10000u128
         }
 
+        /// Returns the platform fee rate in basis points (e.g., 100 = 1%)
+        fn get_platform_fee_rate(self: @ContractState) -> u128 {
+            self.platform_fee_rate.read()
+        }
+
         fn get_contribution_stats(
             self: @ContractState,
             campaign_id: u128,
@@ -183,4 +193,5 @@ pub mod Contribution {
             assert(caller == admin, 'Caller is not admin');
         }
     }
+}
 }
