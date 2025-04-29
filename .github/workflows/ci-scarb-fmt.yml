@@ -1,22 +1,30 @@
-name: Scarb Format Check
+name: Build and Test
 
-on:
-  pull_request:
-    branches:
-      - main
+on: [push, pull_request]
+permissions: read-all
 
 jobs:
-  scarb-fmt:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      # Checkout the code
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+      - uses: software-mansion/setup-scarb@v1
+        with:
+          scarb-version: 2.11.2
+      - name: Check cairo format
+        run: scarb fmt --check
+      - name: Build cairo programs
+        run: scarb build
 
-      # Install Scarb
-      - name: Install Scarb
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          export PATH="$HOME/.cargo/bin:$PATH"
-          cargo install scarb
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: software-mansion/setup-scarb@v1
+        with:
+          scarb-version: 2.11.2
+      - uses: foundry-rs/setup-snfoundry@v3
+        with:
+          starknet-foundry-version: 0.40.0
+      - name: Run cairo tests
+        run: snforge test
