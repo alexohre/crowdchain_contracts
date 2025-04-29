@@ -1,0 +1,22 @@
+name: Scarb Format Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  scarb-fmt:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the code
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # Install Scarb
+      - name: Install Scarb
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo install scarb
