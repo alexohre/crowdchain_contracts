@@ -91,6 +91,10 @@ src/
 │ └──  Structs definitions
 ├── interfaces/
 │   └── Contract interfaces implementation
+├── contribution/
+│   ├── Contribution.cairo          # Contribution management contract implementation
+│   ├── ContributionEvent.cairo     # Contribution related events
+│   └── IContribution.cairo         # Contribution interface definition
 └── lib.cairo     # Library entry point
 
 tests/           # Test directory
@@ -102,6 +106,18 @@ tests/           # Test directory
 - Pausable contract functionality
 - Reentrancy protection
 - Extensive error handling
+
+## 🆕 Contribution Management
+
+This project now includes a Contribution Management Contract feature that enables:
+
+- Processing contributions to campaigns with platform fee calculation
+- Withdrawal of contributed funds by contributors
+- Tracking contribution statistics per campaign and contributor
+- Emitting events for contributions, withdrawals, fee collection, and stats updates
+- Maintaining a list of top contributors
+
+This feature is implemented in the `src/contribution` directory and is covered by comprehensive unit tests in the `tests` directory.
 
 ## 📝 Development Environment
 
