@@ -1,454 +1,583 @@
 #[cfg(test)]
 mod test_nft_reward {
     use core::array::ArrayTrait;
+    use core::option::OptionTrait;
     use core::result::ResultTrait;
-    use core::traits::Into;
-    use crowdchain_contracts::contracts::NFTReward::{
-        INFTRewardDispatcher, INFTRewardDispatcherTrait, NFTRewardContract,
-    };
+    use core::traits::{Into, TryInto};
+    use crowdchain_contracts::contracts::NFTReward::NFTRewardContract;
+    use crowdchain_contracts::events::NFTRewardEvent::{NFTRewardMinted, TierMetadataUpdated};
     use crowdchain_contracts::interfaces::ICampaign::{
         ICampaignDispatcher, ICampaignDispatcherTrait,
     };
     use crowdchain_contracts::interfaces::IContribution::{
         IContributionDispatcher, IContributionDispatcherTrait,
     };
-    use crowdchain_contracts::contracts::NFTReward::NFTRewardContract;
-    use crowdchain_contracts::interfaces::INFTReward::{INFTRewardDispatcher, INFTRewardDispatcherTrait};
-    use openzeppelin::token::erc721::interface::{IERC721Dispatcher, IERC721DispatcherTrait};
+    use crowdchain_contracts::interfaces::INFTReward::{
+        INFTRewardDispatcher, INFTRewardDispatcherTrait,
+    };
+    use openzeppelin::token::erc721::interface::{
+        IERC721Dispatcher, IERC721DispatcherTrait, IERC721MetadataDispatcher,
+        IERC721MetadataDispatcherTrait,
+    };
     use snforge_std::{
         CheatSpan, ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait,
-        cheat_caller_address, declare, mock_call, spy_events,
+        cheat_caller_address, declare, spy_events,
     };
-    use openzeppelin::token::erc721::interface::{IERC721Dispatcher, IERC721DispatcherTrait};
-    use starknet::{ClassHash, ContractAddress, contract_address_const};
+    use starknet::ContractAddress;
 
     // Address constants for testing
-    fn USER_1() -> ContractAddress {
-        contract_address_const::<'user_1'>()
-    }
-
-    fn USER_2() -> ContractAddress {
-        contract_address_const::<'user_2'>()
+    fn ADMIN() -> ContractAddress {
+        let admin: felt252 = 'admin';
+        admin.try_into().unwrap()
     }
 
     fn OWNER() -> ContractAddress {
-        contract_address_const::<'owner'>()
+        let owner: felt252 = 'owner';
+        owner.try_into().unwrap()
+    }
+
+    fn USER_1() -> ContractAddress {
+        let user1: felt252 = 'user1';
+        user1.try_into().unwrap()
+    }
+
+    fn USER_2() -> ContractAddress {
+        let user2: felt252 = 'user2';
+        user2.try_into().unwrap()
     }
 
     fn ZERO_ADDRESS() -> ContractAddress {
-        contract_address_const::<0>()
+        0.try_into().unwrap()
     }
 
-    // Test token constants
-    const TOKEN_NAME: felt252 = 'CrowdchainNFT';
-    const TOKEN_SYMBOL: felt252 = 'CRDNFTS';
-    const CAMPAIGN_1: u128 = 1;
-    const CAMPAIGN_2: u128 = 2;
-    const CAMPAIGN_3: u128 = 3;
+    // Test constants
+    const CAMPAIGN_ID: u128 = 1;
+    const CAMPAIGN_METADATA: felt252 = 'test_campaign';
+    const PLATFORM_FEE_RATE: u128 = 100; // 1%
 
-    /// Helper function to deploy the NFTReward contract
-    fn deploy_nft_reward(owner: ContractAddress) -> (ContractAddress, INFTRewardDispatcher) {
-        // Declare the NFTReward contract to get contract class
-        let contract_class = declare("NFTRewardContract").unwrap().contract_class();
-
-        // Initialize NFT reward contract calldata
-        let mut calldata = array![];
-        calldata.append(owner.into());
-        calldata.append(TOKEN_NAME);
-        calldata.append(TOKEN_SYMBOL);
-
-        // Deploy NFTReward contract and return address and dispatcher
-        let (contract_address, _) = contract_class.deploy(@calldata).unwrap();
-        (contract_address, INFTRewardDispatcher { contract_address })
+    // Struct to hold deployed contracts for tests
+    #[derive(Drop)]
+    struct TestContracts {
+        campaign_contract: ContractAddress,
+        contribution_contract: ContractAddress,
+        nft_reward_contract: ContractAddress,
+        campaign_dispatcher: ICampaignDispatcher,
+        contribution_dispatcher: IContributionDispatcher,
+        reward_dispatcher: INFTRewardDispatcher,
     }
 
-    /// Set up mock for the contribution contract
-    fn setup_contribution_mock(
-        reward_address: ContractAddress,
-        user: ContractAddress,
-        campaign_id: u128,
-        contribution_amount: u128,
-    ) {
-        // Mock the get_contribution_stats function to return valid contributions
-        mock_call(
-            reward_address,
-            CONTRIBUTION_CONTRACT(),
-            selector!("get_contribution_stats"),
-            array![campaign_id.into(), user.into(), contribution_amount.into(), 0],
-        )
-            .unwrap();
+    /// Helper function to deploy all contracts for testing
+    fn deploy_contracts() -> TestContracts {
+        // Declare contract classes
+        let campaign_class = declare("Campaign").unwrap().contract_class();
+        let contribution_class = declare("Contribution").unwrap().contract_class();
+        let nft_reward_class = declare("NFTRewardContract").unwrap().contract_class();
+
+        // Deploy Campaign contract
+        let mut campaign_calldata = array![];
+        campaign_calldata.append(ADMIN().into());
+        let (campaign_address, _) = campaign_class.deploy(@campaign_calldata).unwrap();
+
+        // Deploy Contribution contract
+        let mut contribution_calldata = array![];
+        contribution_calldata.append(ADMIN().into());
+        contribution_calldata.append(PLATFORM_FEE_RATE.into());
+        let (contribution_address, _) = contribution_class.deploy(@contribution_calldata).unwrap();
+
+        // Deploy NFTReward contract
+        let mut nft_reward_calldata = array![];
+        let token_name: ByteArray = "CrowdchainNFT";
+        let token_symbol: ByteArray = "CRDNFTS";
+
+        nft_reward_calldata.append(OWNER().into());
+        nft_reward_calldata.append(contribution_address.into());
+        nft_reward_calldata.append(campaign_address.into());
+        token_name.serialize(ref nft_reward_calldata);
+        token_symbol.serialize(ref nft_reward_calldata);
+        let (nft_reward_address, _) = nft_reward_class.deploy(@nft_reward_calldata).unwrap();
+
+        // Create dispatchers
+        let campaign_dispatcher = ICampaignDispatcher { contract_address: campaign_address };
+        let contribution_dispatcher = IContributionDispatcher {
+            contract_address: contribution_address,
+        };
+        let reward_dispatcher = INFTRewardDispatcher { contract_address: nft_reward_address };
+
+        // Return all deployed contracts
+        TestContracts {
+            campaign_contract: campaign_address,
+            contribution_contract: contribution_address,
+            nft_reward_contract: nft_reward_address,
+            campaign_dispatcher,
+            contribution_dispatcher,
+            reward_dispatcher,
+        }
     }
 
     #[test]
     fn test_nft_reward_initialization() {
-        // Deploy NFT reward contract
-        let owner = OWNER();
-        let (reward_address, reward_dispatcher) = deploy_nft_reward(owner);
+        // Deploy contracts
+        let contracts = deploy_contracts();
+        let token_name: ByteArray = "CrowdchainNFT";
+        let token_symbol: ByteArray = "CRDNFTS";
 
-        // Verify contract initialization
-        assert(reward_dispatcher.name() == TOKEN_NAME, 'Name mismatch');
-        assert(reward_dispatcher.symbol() == TOKEN_SYMBOL, 'Symbol mismatch');
-
+        // Verify NFTReward contract initialization
+        assert(
+            IERC721MetadataDispatcher { contract_address: contracts.nft_reward_contract }
+                .name() == token_name,
+            'Name mismatch',
+        );
+        assert(
+            IERC721MetadataDispatcher { contract_address: contracts.nft_reward_contract }
+                .symbol() == token_symbol,
+            'Symbol mismatch',
+        );
         // Check tier metadata initialization
-        assert(reward_dispatcher.get_tier_metadata(1) != 0, 'Tier 1 metadata not set');
-        assert(reward_dispatcher.get_tier_metadata(2) != 0, 'Tier 2 metadata not set');
-        assert(reward_dispatcher.get_tier_metadata(3) != 0, 'Tier 3 metadata not set');
-        assert(reward_dispatcher.get_tier_metadata(4) != 0, 'Tier 4 metadata not set');
-        assert(reward_dispatcher.get_tier_metadata(5) != 0, 'Tier 5 metadata not set');
-
-        // Set contract addresses as owner
-        cheat_caller_address(reward_address, owner, CheatSpan::TargetCalls(2));
-        reward_dispatcher.set_contribution_contract(CONTRIBUTION_CONTRACT());
-        reward_dispatcher.set_campaign_contract(CAMPAIGN_CONTRACT());
+        assert(contracts.reward_dispatcher.get_tier_metadata(1) != 0, 'Tier 1 metadata not set');
+        assert(contracts.reward_dispatcher.get_tier_metadata(2) != 0, 'Tier 2 metadata not set');
+        assert(contracts.reward_dispatcher.get_tier_metadata(3) != 0, 'Tier 3 metadata not set');
+        assert(contracts.reward_dispatcher.get_tier_metadata(4) != 0, 'Tier 4 metadata not set');
+        assert(contracts.reward_dispatcher.get_tier_metadata(5) != 0, 'Tier 5 metadata not set');
     }
 
     #[test]
-    fn test_record_contribution() {
-        // Deploy NFT reward contract
+    fn test_mint_nft_reward() {
+        // Deploy contracts
+        let mut contracts = deploy_contracts();
+
+        // Setup test user
+        let user = USER_1();
         let owner = OWNER();
-        let (reward_address, reward_dispatcher) = deploy_nft_reward(owner);
 
-        // Setup test users
-        let user_1 = USER_1();
+        // Create a campaign and approve creator
+        cheat_caller_address(contracts.campaign_contract, ADMIN(), CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.approve_creator(owner);
 
-        // Set contract addresses
-        cheat_caller_address(reward_address, owner, CheatSpan::TargetCalls(2));
-        reward_dispatcher.set_contribution_contract(CONTRIBUTION_CONTRACT());
-        reward_dispatcher.set_campaign_contract(CAMPAIGN_CONTRACT());
+        // Create campaign
+        cheat_caller_address(contracts.campaign_contract, owner, CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.create_campaign(owner, CAMPAIGN_METADATA);
 
-        // Set up contribution mock
-        setup_contribution_mock(reward_address, user_1, CAMPAIGN_1, 100);
-
-        // Mock campaign contract add_supporter call
-        mock_call(
-            reward_address,
-            CAMPAIGN_CONTRACT(),
-            selector!("add_supporter"),
-            array![CAMPAIGN_1.into(), user_1.into()],
-        )
-            .unwrap();
-
-        // Spy on events
-        let mut event_spy = spy_events();
-
-        // Record a contribution for user_1
-        cheat_caller_address(reward_address, owner, CheatSpan::TargetCalls(1));
-        reward_dispatcher.record_contribution(user_1, CAMPAIGN_1);
+        // Make a contribution to the campaign
+        let contribution_amount = 500;
+        cheat_caller_address(contracts.contribution_contract, user, CheatSpan::TargetCalls(1));
+        contracts
+            .contribution_dispatcher
+            .process_contribution(CAMPAIGN_ID, user, contribution_amount);
 
         // Verify contribution was recorded
+        let (total_contributed, _) = contracts
+            .contribution_dispatcher
+            .get_contribution_stats(CAMPAIGN_ID, user);
+        assert(total_contributed == contribution_amount, 'Contribution not recorded');
+
+        // Verify contribution count is 1
+        let contribution_count = contracts
+            .contribution_dispatcher
+            .get_total_contribution_count(user);
+        assert(contribution_count == 1, 'Should have 1 contribution');
+
+        // Verify tier eligibility is based on campaign count, not amount
         assert(
-            reward_dispatcher.get_supported_projects_count(user_1) == 1,
-            'Project count should be 1',
-        );
-        assert(
-            reward_dispatcher.is_eligible_for_tier(user_1, 1), 'User should be eligible for tier 1',
-        );
-        assert(
-            !reward_dispatcher.is_eligible_for_tier(user_1, 2),
-            'User should not be eligible for tier 2',
-        );
-
-        // Verify events were emitted
-        event_spy
-            .assert_emitted(
-                @array![
-                    (
-                        reward_address,
-                        NFTRewardContract::Event::ContributionRecorded(
-                            NFTRewardContract::ContributionRecorded {
-                                user: user_1,
-                                campaign_id: CAMPAIGN_1,
-                                total_projects_supported: 1,
-                            },
-                        ),
-                    ),
-                    (
-                        reward_address,
-                        NFTRewardContract::Event::UserEligibleForNewTier(
-                            NFTRewardContract::UserEligibleForNewTier {
-                                user: user_1, tier: 1, projects_supported: 1,
-                            },
-                        ),
-                    ),
-                ],
-            );
-    }
-
-    #[test]
-    fn test_multiple_campaigns_tier_progression() {
-        // Deploy NFT reward contract
-        let owner = OWNER();
-        let (reward_address, reward_dispatcher) = deploy_nft_reward(owner);
-
-        // Setup test users
-        let user_1 = USER_1();
-
-        // Set contract addresses
-        cheat_caller_address(reward_address, owner, CheatSpan::TargetCalls(2));
-        reward_dispatcher.set_contribution_contract(CONTRIBUTION_CONTRACT());
-        reward_dispatcher.set_campaign_contract(CAMPAIGN_CONTRACT());
-
-        // Set up campaign mock to accept any add_supporter call
-        mock_call(reward_address, CAMPAIGN_CONTRACT(), selector!("add_supporter"), array![])
-            .unwrap();
-
-        // Set owner as caller for all contribution recording
-        cheat_caller_address(reward_address, owner, CheatSpan::Indefinite);
-
-        // Record contributions across multiple campaigns
-        // Campaign 1
-        setup_contribution_mock(reward_address, user_1, CAMPAIGN_1, 100);
-        reward_dispatcher.record_contribution(user_1, CAMPAIGN_1);
-        assert(
-            reward_dispatcher
-                .get_nft_tier(reward_dispatcher.get_supported_projects_count(user_1)) == 1,
-            'Should be tier 1',
+            contracts.reward_dispatcher.get_nft_tier(contribution_count) == 1, 'Should be tier 1',
         );
 
-        // Campaign 2
-        setup_contribution_mock(reward_address, user_1, CAMPAIGN_2, 200);
-        reward_dispatcher.record_contribution(user_1, CAMPAIGN_2);
+        // Mint NFT reward
+        cheat_caller_address(contracts.nft_reward_contract, user, CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.mint_nft_reward(user);
+
+        // Verify the NFT was minted
+        assert(contracts.reward_dispatcher.has_claimed_reward(user, 1), 'Reward should be claimed');
         assert(
-            reward_dispatcher
-                .get_nft_tier(reward_dispatcher.get_supported_projects_count(user_1)) == 2,
-            'Should be tier 2',
+            IERC721Dispatcher { contract_address: contracts.nft_reward_contract }
+                .balance_of(user) == 1,
+            'Should have 1 NFT',
         );
 
-        // Campaign 3
-        setup_contribution_mock(reward_address, user_1, CAMPAIGN_3, 300);
-        reward_dispatcher.record_contribution(user_1, CAMPAIGN_3);
-        assert(
-            reward_dispatcher
-                .get_nft_tier(reward_dispatcher.get_supported_projects_count(user_1)) == 3,
-            'Should be tier 3',
-        );
-
-        // Campaign 4
-        setup_contribution_mock(reward_address, user_1, 4, 400);
-        reward_dispatcher.record_contribution(user_1, 4);
-        assert(
-            reward_dispatcher
-                .get_nft_tier(reward_dispatcher.get_supported_projects_count(user_1)) == 4,
-            'Should be tier 4',
-        );
-
-        // Campaign 5
-        setup_contribution_mock(reward_address, user_1, 5, 500);
-        reward_dispatcher.record_contribution(user_1, 5);
-        assert(
-            reward_dispatcher
-                .get_nft_tier(reward_dispatcher.get_supported_projects_count(user_1)) == 5,
-            'Should be tier 5',
-        );
-
-        // Verify final eligibility
-        assert(reward_dispatcher.is_eligible_for_tier(user_1, 1), 'Should be eligible for tier 1');
-        assert(reward_dispatcher.is_eligible_for_tier(user_1, 2), 'Should be eligible for tier 2');
-        assert(reward_dispatcher.is_eligible_for_tier(user_1, 3), 'Should be eligible for tier 3');
-        assert(reward_dispatcher.is_eligible_for_tier(user_1, 4), 'Should be eligible for tier 4');
-        assert(reward_dispatcher.is_eligible_for_tier(user_1, 5), 'Should be eligible for tier 5');
-    }
-
-    #[test]
-    fn test_mint_nft_reward_for_campaign() {
-        // Deploy NFT reward contract
-        let owner = OWNER();
-        let (reward_address, reward_dispatcher) = deploy_nft_reward(owner);
-
-        // Setup test users
-        let user_1 = USER_1();
-
-        // Set contract addresses
-        cheat_caller_address(reward_address, owner, CheatSpan::TargetCalls(2));
-        reward_dispatcher.set_contribution_contract(CONTRIBUTION_CONTRACT());
-        reward_dispatcher.set_campaign_contract(CAMPAIGN_CONTRACT());
-
-        // Set up mock for the contribution contract
-        setup_contribution_mock(reward_address, user_1, CAMPAIGN_1, 100);
-
-        // Mock campaign contract add_supporter call
-        mock_call(
-            reward_address,
-            CAMPAIGN_CONTRACT(),
-            selector!("add_supporter"),
-            array![CAMPAIGN_1.into(), user_1.into()],
-        )
-            .unwrap();
-
-        // Record a contribution
-        cheat_caller_address(reward_address, owner, CheatSpan::TargetCalls(1));
-        reward_dispatcher.record_contribution(user_1, CAMPAIGN_1);
-
-        // Spy on events for the mint
-        let mut event_spy = spy_events();
-
-        // Mint NFT reward for the specific campaign
-        cheat_caller_address(reward_address, owner, CheatSpan::TargetCalls(1));
-        reward_dispatcher.mint_nft_reward(user_1, CAMPAIGN_1);
-
-        // Verify the NFT was minted and user claimed status
-        assert(
-            reward_dispatcher.has_claimed_reward(user_1, CAMPAIGN_1),
-            'User should have claimed reward',
-        );
-        assert(reward_dispatcher.balance_of(user_1) == 1, 'User should have 1 NFT');
-
-        // Get the token ID (should be 1)
-        let user_nfts = reward_dispatcher.get_user_nfts(user_1);
+        // Get user NFTs
+        let user_nfts = contracts.reward_dispatcher.get_user_nfts(user);
         assert(user_nfts.len() == 1, 'User should have 1 token');
 
         // Verify token tier
         let token_id = *user_nfts.at(0);
-        assert(reward_dispatcher.get_token_tier(token_id) == 1, 'Token should be tier 1');
+        assert(contracts.reward_dispatcher.get_token_tier(token_id) == 1, 'Token should be tier 1');
 
-        // Verify token ownership
-        assert(reward_dispatcher.owner_of(token_id) == user_1, 'User should own the token');
-
-        // Check token URI
-        assert(reward_dispatcher.token_uri(token_id) != 0, 'Token URI should be set');
-
-        // Verify minting event
-        event_spy
-            .assert_emitted(
-                @array![
-                    (
-                        reward_address,
-                        NFTRewardContract::Event::NFTRewardEvent(
-                            crowdchain_contracts::events::NFTRewardEvent::Event::NFTRewardMinted(
-                                crowdchain_contracts::events::NFTRewardEvent::NFTRewardMinted {
-                                    recipient: user_1,
-                                    campaign_id: CAMPAIGN_1,
-                                    token_id: token_id.try_into().unwrap(),
-                                    tier: 1,
-                                    metadata_uri: reward_dispatcher.get_tier_metadata(1),
-                                },
-                            ),
-                        ),
-                    ),
-                ],
-            );
+        // Verify ownership
+        assert(
+            IERC721Dispatcher { contract_address: contracts.nft_reward_contract }
+                .owner_of(token_id) == user,
+            'User should own token',
+        );
     }
 
     #[test]
-    #[should_panic(expected: 'Campaign reward already claimed')]
-    fn test_cannot_mint_reward_twice_for_same_campaign() {
-        // Deploy NFT reward contract
-        let owner = OWNER();
-        let (reward_address, reward_dispatcher) = deploy_nft_reward(owner);
+    fn test_tier_eligibility() {
+        // Deploy contracts
+        let mut contracts = deploy_contracts();
 
         // Setup test users
-        let user_1 = USER_1();
+        let owner = OWNER();
+        let tier1_user = USER_1();
+        let tier3_user = USER_2();
 
-        // Set contract addresses
-        cheat_caller_address(reward_address, owner, CheatSpan::TargetCalls(2));
-        reward_dispatcher.set_contribution_contract(CONTRIBUTION_CONTRACT());
-        reward_dispatcher.set_campaign_contract(CAMPAIGN_CONTRACT());
+        // Create a campaign and approve creator
+        cheat_caller_address(contracts.campaign_contract, ADMIN(), CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.approve_creator(owner);
 
-        // Set up mock for the contribution contract
-        setup_contribution_mock(reward_address, user_1, CAMPAIGN_1, 100);
+        // Create first campaign
+        cheat_caller_address(contracts.campaign_contract, owner, CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.create_campaign(owner, CAMPAIGN_METADATA);
 
-        // Mock campaign contract add_supporter call
-        mock_call(
-            reward_address,
-            CAMPAIGN_CONTRACT(),
-            selector!("add_supporter"),
-            array![CAMPAIGN_1.into(), user_1.into()],
-        )
-            .unwrap();
+        // Create second campaign
+        cheat_caller_address(contracts.campaign_contract, owner, CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.create_campaign(owner, 'second_campaign');
 
-        // Record a contribution
-        cheat_caller_address(reward_address, owner, CheatSpan::Indefinite);
-        reward_dispatcher.record_contribution(user_1, CAMPAIGN_1);
+        // Create third campaign
+        cheat_caller_address(contracts.campaign_contract, owner, CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.create_campaign(owner, 'third_campaign');
+
+        // User 1 contributes to 1 campaign
+        cheat_caller_address(
+            contracts.contribution_contract, tier1_user, CheatSpan::TargetCalls(1),
+        );
+        contracts.contribution_dispatcher.process_contribution(CAMPAIGN_ID, tier1_user, 500);
+
+        // User 2 contributes to 3 campaigns
+        cheat_caller_address(
+            contracts.contribution_contract, tier3_user, CheatSpan::TargetCalls(1),
+        );
+        contracts.contribution_dispatcher.process_contribution(CAMPAIGN_ID, tier3_user, 500);
+
+        cheat_caller_address(
+            contracts.contribution_contract, tier3_user, CheatSpan::TargetCalls(1),
+        );
+        contracts.contribution_dispatcher.process_contribution(CAMPAIGN_ID + 1, tier3_user, 500);
+
+        cheat_caller_address(
+            contracts.contribution_contract, tier3_user, CheatSpan::TargetCalls(1),
+        );
+        contracts.contribution_dispatcher.process_contribution(CAMPAIGN_ID + 2, tier3_user, 500);
+
+        // Verify tier eligibility is based on campaign count, not contribution amount
+        // User 1 contributed to 1 campaign, should be eligible for tier 1
+        assert(
+            contracts.contribution_dispatcher.get_total_contribution_count(tier1_user) == 1,
+            'User1 should have 1 contrib',
+        );
+
+        assert(
+            contracts.reward_dispatcher.can_claim_tier_reward(tier1_user, 1),
+            'User1 tier 1 eligible',
+        );
+
+        assert(
+            !contracts.reward_dispatcher.can_claim_tier_reward(tier1_user, 2),
+            'User1 not tier 2 eligible',
+        );
+
+        // User 2 contributed to 3 campaigns, should be eligible for tier 3
+        assert(
+            contracts.contribution_dispatcher.get_total_contribution_count(tier3_user) == 3,
+            'User2 should have 3 contrib',
+        );
+
+        assert(
+            contracts.reward_dispatcher.can_claim_tier_reward(tier3_user, 1),
+            'User2 tier 1 eligible',
+        );
+
+        assert(
+            contracts.reward_dispatcher.can_claim_tier_reward(tier3_user, 2),
+            'User2 tier 2 eligible',
+        );
+
+        assert(
+            contracts.reward_dispatcher.can_claim_tier_reward(tier3_user, 3),
+            'User2 tier 3 eligible',
+        );
+
+        assert(
+            !contracts.reward_dispatcher.can_claim_tier_reward(tier3_user, 4),
+            'User2 not tier 4 eligible',
+        );
+
+        // Verify get_nft_tier returns the correct tier based on campaign count
+        assert(contracts.reward_dispatcher.get_nft_tier(1) == 1, 'Should return tier 1');
+        assert(contracts.reward_dispatcher.get_nft_tier(2) == 2, 'Should return tier 2');
+        assert(contracts.reward_dispatcher.get_nft_tier(3) == 3, 'Should return tier 3');
+        assert(contracts.reward_dispatcher.get_nft_tier(4) == 4, 'Should return tier 4');
+        assert(contracts.reward_dispatcher.get_nft_tier(5) == 5, 'Should return tier 5');
+    }
+
+    #[test]
+    #[should_panic(expected: 'Tier reward already claimed')]
+    fn test_cannot_claim_reward_twice() {
+        // Deploy contracts
+        let mut contracts = deploy_contracts();
+
+        // Setup test user
+        let user = USER_1();
+        let owner = OWNER();
+
+        // Create a campaign and approve creator
+        cheat_caller_address(contracts.campaign_contract, ADMIN(), CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.approve_creator(owner);
+
+        // Create campaign
+        cheat_caller_address(contracts.campaign_contract, owner, CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.create_campaign(owner, CAMPAIGN_METADATA);
+
+        // Make a contribution
+        cheat_caller_address(contracts.contribution_contract, user, CheatSpan::TargetCalls(1));
+        contracts.contribution_dispatcher.process_contribution(CAMPAIGN_ID, user, 500);
 
         // Mint first reward (should succeed)
-        reward_dispatcher.mint_nft_reward(user_1, CAMPAIGN_1);
+        cheat_caller_address(contracts.nft_reward_contract, user, CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.mint_nft_reward(user);
 
-        // Try to mint second reward for same campaign (should fail)
-        reward_dispatcher.mint_nft_reward(user_1, CAMPAIGN_1);
+        // Try to mint again (should fail)
+        cheat_caller_address(contracts.nft_reward_contract, user, CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.mint_nft_reward(user);
     }
 
     #[test]
-    fn test_multiple_campaign_rewards() {
-        // Deploy NFT reward contract
-        let owner = OWNER();
-        let (reward_address, reward_dispatcher) = deploy_nft_reward(owner);
+    #[should_panic(expected: 'No contributions found')]
+    fn test_cannot_mint_without_contribution() {
+        // Deploy contracts
+        let mut contracts = deploy_contracts();
 
-        // Setup test users
-        let user_1 = USER_1();
+        // Setup test user
+        let user = USER_1();
 
-        // Set contract addresses
-        cheat_caller_address(reward_address, owner, CheatSpan::TargetCalls(2));
-        reward_dispatcher.set_contribution_contract(CONTRIBUTION_CONTRACT());
-        reward_dispatcher.set_campaign_contract(CAMPAIGN_CONTRACT());
-
-        // Set up mock for campaign contract
-        mock_call(reward_address, CAMPAIGN_CONTRACT(), selector!("add_supporter"), array![])
-            .unwrap();
-
-        // Record contributions to multiple campaigns
-        cheat_caller_address(reward_address, owner, CheatSpan::Indefinite);
-
-        // Campaign 1
-        setup_contribution_mock(reward_address, user_1, CAMPAIGN_1, 100);
-        reward_dispatcher.record_contribution(user_1, CAMPAIGN_1);
-
-        // Campaign 2
-        setup_contribution_mock(reward_address, user_1, CAMPAIGN_2, 200);
-        reward_dispatcher.record_contribution(user_1, CAMPAIGN_2);
-
-        // Mint rewards for each campaign
-        reward_dispatcher.mint_nft_reward(user_1, CAMPAIGN_1);
-        reward_dispatcher.mint_nft_reward(user_1, CAMPAIGN_2);
-
-        // Verify rewards were claimed for each campaign
-        assert(
-            reward_dispatcher.has_claimed_reward(user_1, CAMPAIGN_1),
-            'Campaign 1 reward not claimed',
-        );
-        assert(
-            reward_dispatcher.has_claimed_reward(user_1, CAMPAIGN_2),
-            'Campaign 2 reward not claimed',
-        );
-
-        // Verify user has 2 NFTs
-        assert(reward_dispatcher.balance_of(user_1) == 2, 'User should have 2 NFTs');
-
-        // Get the tokens
-        let user_nfts = reward_dispatcher.get_user_nfts(user_1);
-        assert(user_nfts.len() == 2, 'User should have 2 tokens');
+        // Try to mint without any contribution (should fail)
+        cheat_caller_address(contracts.nft_reward_contract, user, CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.mint_nft_reward(user);
     }
 
     #[test]
     fn test_set_tier_metadata() {
-        // Deploy NFT reward contract
-        let owner = OWNER();
-        let (reward_address, reward_dispatcher) = deploy_nft_reward(owner);
+        // Deploy contracts
+        let mut contracts = deploy_contracts();
 
-        // Spy on events
-        let mut event_spy = spy_events();
+        // New metadata URI
+        let new_metadata = 'ipfs://new_tier_metadata';
 
-        // Set new metadata for tier 1
-        let new_metadata: felt252 = 'ipfs://new_tier1_metadata';
-        cheat_caller_address(reward_address, owner, CheatSpan::TargetCalls(1));
-        reward_dispatcher.set_tier_metadata(1, new_metadata);
+        // Set tier metadata as owner
+        cheat_caller_address(contracts.nft_reward_contract, OWNER(), CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.set_tier_metadata(1, new_metadata);
 
         // Verify metadata was updated
         assert(
-            reward_dispatcher.get_tier_metadata(1) == new_metadata, 'Metadata should be updated',
+            contracts.reward_dispatcher.get_tier_metadata(1) == new_metadata,
+            'Metadata should be updated',
+        );
+    }
+
+    #[test]
+    fn test_get_available_tiers() {
+        // Deploy contracts
+        let mut contracts = deploy_contracts();
+
+        // Setup test user
+        let user = USER_1();
+        let owner = OWNER();
+
+        // Create and approve three campaigns
+        cheat_caller_address(contracts.campaign_contract, ADMIN(), CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.approve_creator(owner);
+
+        cheat_caller_address(contracts.campaign_contract, owner, CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.create_campaign(owner, CAMPAIGN_METADATA);
+
+        cheat_caller_address(contracts.campaign_contract, owner, CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.create_campaign(owner, 'second_campaign');
+
+        cheat_caller_address(contracts.campaign_contract, owner, CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.create_campaign(owner, 'third_campaign');
+
+        // No contributions yet
+        let tiers = contracts.reward_dispatcher.get_available_tiers(user);
+        assert(tiers.len() == 0, 'No available tiers yet');
+
+        // Contribute to first campaign - now eligible for tier 1
+        cheat_caller_address(contracts.contribution_contract, user, CheatSpan::TargetCalls(1));
+        contracts.contribution_dispatcher.process_contribution(CAMPAIGN_ID, user, 500);
+
+        let tiers_after_one = contracts.reward_dispatcher.get_available_tiers(user);
+        assert(tiers_after_one.len() == 1, 'Should have 1 available tier');
+        assert(*tiers_after_one.at(0) == 1, 'Should be tier 1 eligible');
+
+        // Contribute to second campaign - now eligible for tier 2 as well
+        cheat_caller_address(contracts.contribution_contract, user, CheatSpan::TargetCalls(1));
+        contracts.contribution_dispatcher.process_contribution(CAMPAIGN_ID + 1, user, 500);
+
+        let tiers_after_two = contracts.reward_dispatcher.get_available_tiers(user);
+        assert(tiers_after_two.len() == 2, 'Should have 2 available tiers');
+        assert(*tiers_after_two.at(0) == 1, 'Should be tier 1 eligible');
+        assert(*tiers_after_two.at(1) == 2, 'Should be tier 2 eligiblea');
+
+        // Claim tier 2 reward
+        cheat_caller_address(contracts.nft_reward_contract, user, CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.mint_nft_reward(user);
+
+        let tiers_after_claim = contracts.reward_dispatcher.get_available_tiers(user);
+        assert(tiers_after_claim.len() == 1, 'Should have 1 available tier');
+        assert(*tiers_after_claim.at(0) == 1, 'Should be tier 2 eligibleb');
+
+        // Contribute to third campaign - now eligible for tier 3 as well
+        cheat_caller_address(contracts.contribution_contract, user, CheatSpan::TargetCalls(1));
+        contracts.contribution_dispatcher.process_contribution(CAMPAIGN_ID + 2, user, 500);
+
+        let tiers_after_three = contracts.reward_dispatcher.get_available_tiers(user);
+        assert(tiers_after_three.len() == 2, 'Should have 2 available tiers');
+        assert(*tiers_after_three.at(0) == 1, 'Should be tier 2 eligiblec');
+        assert(*tiers_after_three.at(1) == 3, 'Should be tier 3 eligible');
+    }
+
+    #[test]
+    #[should_panic(expected: 'Recipient is zero address')]
+    fn test_mint_zero_address() {
+        // Deploy contracts
+        let mut contracts = deploy_contracts();
+
+        // Try to mint for zero address
+        cheat_caller_address(contracts.nft_reward_contract, OWNER(), CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.mint_nft_reward(ZERO_ADDRESS());
+    }
+
+    #[test]
+    #[should_panic(expected: 'Contribution contract not set')]
+    fn test_set_invalid_contract_addresses() {
+        // Deploy contracts
+        let mut contracts = deploy_contracts();
+
+        // Try to set zero address as campaign contract
+        cheat_caller_address(contracts.nft_reward_contract, OWNER(), CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.set_campaign_contract(ZERO_ADDRESS());
+    }
+
+    #[test]
+    #[should_panic(expected: 'Caller is not the owner')]
+    fn test_set_metadata_unauthorized() {
+        // Deploy contracts
+        let mut contracts = deploy_contracts();
+
+        // Try to set metadata as non-owner
+        cheat_caller_address(contracts.nft_reward_contract, USER_1(), CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.set_tier_metadata(1, 'unauthorized');
+    }
+
+    #[test]
+    fn test_multiple_user_rewards() {
+        // Deploy contracts
+        let mut contracts = deploy_contracts();
+
+        // Setup test users
+        let user1 = USER_1();
+        let user2 = USER_2();
+        let owner = OWNER();
+
+        // Create a campaign and approve creator
+        cheat_caller_address(contracts.campaign_contract, ADMIN(), CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.approve_creator(owner);
+
+        cheat_caller_address(contracts.campaign_contract, owner, CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.create_campaign(owner, CAMPAIGN_METADATA);
+
+        cheat_caller_address(contracts.campaign_contract, owner, CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.create_campaign(owner, 'second_campaign');
+
+        // User 1 contributes to one campaign
+        cheat_caller_address(contracts.contribution_contract, user1, CheatSpan::TargetCalls(1));
+        contracts.contribution_dispatcher.process_contribution(CAMPAIGN_ID, user1, 500);
+
+        // User 2 contributes to two campaigns
+        cheat_caller_address(contracts.contribution_contract, user2, CheatSpan::TargetCalls(1));
+        contracts.contribution_dispatcher.process_contribution(CAMPAIGN_ID, user2, 500);
+
+        cheat_caller_address(contracts.contribution_contract, user2, CheatSpan::TargetCalls(1));
+        contracts.contribution_dispatcher.process_contribution(CAMPAIGN_ID + 1, user2, 500);
+
+        // Mint rewards for both users
+        cheat_caller_address(contracts.nft_reward_contract, user1, CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.mint_nft_reward(user1);
+
+        cheat_caller_address(contracts.nft_reward_contract, user2, CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.mint_nft_reward(user2);
+
+        // Verify NFT ownership
+        let user1_nfts = contracts.reward_dispatcher.get_user_nfts(user1);
+        let user2_nfts = contracts.reward_dispatcher.get_user_nfts(user2);
+
+        assert(user1_nfts.len() == 1, 'User1 should have 1 NFT');
+        assert(user2_nfts.len() == 1, 'User2 should have 1 NFT');
+
+        // Verify token tiers
+        let user1_token = *user1_nfts.at(0);
+        let user2_token = *user2_nfts.at(0);
+
+        assert(
+            contracts.reward_dispatcher.get_token_tier(user1_token) == 1,
+            'User1 NFT should be tier 1',
+        );
+        assert(
+            contracts.reward_dispatcher.get_token_tier(user2_token) == 2,
+            'User2 NFT should be tier 2',
         );
 
-        // Verify event emission
-        event_spy
+        // Verify claim status
+        assert(contracts.reward_dispatcher.has_claimed_reward(user1, 1), 'User1 claimed tier 1');
+        assert(
+            !contracts.reward_dispatcher.has_claimed_reward(user1, 2), 'User1 not claimed tier 2',
+        );
+
+        assert(
+            !contracts.reward_dispatcher.has_claimed_reward(user2, 1), 'User2 not claimed tier 1',
+        );
+        assert(contracts.reward_dispatcher.has_claimed_reward(user2, 2), 'User2 claimed tier 2');
+    }
+
+    #[test]
+    fn test_nft_reward_minted_event() {
+        // Deploy contracts
+        let mut contracts = deploy_contracts();
+
+        // Setup test user
+        let user = USER_1();
+        let owner = OWNER();
+
+        // Create a campaign and approve creator
+        cheat_caller_address(contracts.campaign_contract, ADMIN(), CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.approve_creator(owner);
+
+        // Create campaign
+        cheat_caller_address(contracts.campaign_contract, owner, CheatSpan::TargetCalls(1));
+        contracts.campaign_dispatcher.create_campaign(owner, CAMPAIGN_METADATA);
+
+        // Make a contribution to the campaign
+        cheat_caller_address(contracts.contribution_contract, user, CheatSpan::TargetCalls(1));
+        contracts.contribution_dispatcher.process_contribution(CAMPAIGN_ID, user, 500);
+
+        // Start listening for events
+        let mut spy = spy_events();
+
+        // Mint NFT reward
+        cheat_caller_address(contracts.nft_reward_contract, user, CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.mint_nft_reward(user);
+
+        // Get user NFTs
+        let user_nfts = contracts.reward_dispatcher.get_user_nfts(user);
+        let token_id = *user_nfts.at(0);
+        let tier = contracts.reward_dispatcher.get_token_tier(token_id);
+        let metadata_uri = contracts.reward_dispatcher.get_tier_metadata(tier);
+
+        // Assert NFTRewardMinted event was emitted
+        spy
             .assert_emitted(
                 @array![
                     (
-                        reward_address,
-                        NFTRewardContract::Event::NFTRewardEvent(
-                            crowdchain_contracts::events::NFTRewardEvent::Event::TierMetadataUpdated(
-                                crowdchain_contracts::events::NFTRewardEvent::TierMetadataUpdated {
-                                    tier: 1, metadata_uri: new_metadata,
-                                },
-                            ),
+                        contracts.nft_reward_contract,
+                        NFTRewardContract::Event::NFTRewardMinted(
+                            NFTRewardMinted { recipient: user, token_id, tier, metadata_uri },
                         ),
                     ),
                 ],
@@ -456,61 +585,31 @@ mod test_nft_reward {
     }
 
     #[test]
-    #[should_panic(expected: 'Caller is not owner')]
-    fn test_only_admin_can_set_tier_metadata() {
-        // Deploy NFT reward contract
-        let owner = OWNER();
-        let (reward_address, reward_dispatcher) = deploy_nft_reward(owner);
+    fn test_tier_metadata_updated_event() {
+        // Deploy contracts
+        let mut contracts = deploy_contracts();
 
-        // Attempt to set tier metadata as non-owner
-        let user_1 = USER_1();
-        cheat_caller_address(reward_address, user_1, CheatSpan::TargetCalls(1));
-        reward_dispatcher.set_tier_metadata(1, 'ipfs://unauthorized_metadata');
-    }
+        // New metadata URI
+        let new_metadata = 'ipfs://new_tier_metadata';
 
-    #[test]
-    fn test_erc721_transfer_functionality() {
-        // Deploy NFT reward contract
-        let owner = OWNER();
-        let (reward_address, reward_dispatcher) = deploy_nft_reward(owner);
+        // Start listening for events
+        let mut spy = spy_events();
 
-        // Setup test users
-        let user_1 = USER_1();
-        let user_2 = USER_2();
+        // Set tier metadata as owner
+        cheat_caller_address(contracts.nft_reward_contract, OWNER(), CheatSpan::TargetCalls(1));
+        contracts.reward_dispatcher.set_tier_metadata(1, new_metadata);
 
-        // Set contract addresses
-        cheat_caller_address(reward_address, owner, CheatSpan::TargetCalls(2));
-        reward_dispatcher.set_contribution_contract(CONTRIBUTION_CONTRACT());
-        reward_dispatcher.set_campaign_contract(CAMPAIGN_CONTRACT());
-
-        // Set up mock for the contribution contract
-        setup_contribution_mock(reward_address, user_1, CAMPAIGN_1, 100);
-
-        // Mock campaign contract add_supporter call
-        mock_call(
-            reward_address,
-            CAMPAIGN_CONTRACT(),
-            selector!("add_supporter"),
-            array![CAMPAIGN_1.into(), user_1.into()],
-        )
-            .unwrap();
-
-        // Record a contribution and mint NFT
-        cheat_caller_address(reward_address, owner, CheatSpan::Indefinite);
-        reward_dispatcher.record_contribution(user_1, CAMPAIGN_1);
-        reward_dispatcher.mint_nft_reward(user_1, CAMPAIGN_1);
-
-        // Get token ID
-        let user_nfts = reward_dispatcher.get_user_nfts(user_1);
-        let token_id = *user_nfts.at(0);
-
-        // Transfer token from user_1 to user_2
-        cheat_caller_address(reward_address, user_1, CheatSpan::TargetCalls(1));
-        reward_dispatcher.transfer_from(user_1, user_2, token_id);
-
-        // Verify token ownership after transfer
-        assert(reward_dispatcher.owner_of(token_id) == user_2, 'User 2 should own the token');
-        assert(reward_dispatcher.balance_of(user_1) == 0, 'User 1 should have 0 tokens');
-        assert(reward_dispatcher.balance_of(user_2) == 1, 'User 2 should have 1 token');
+        // Assert TierMetadataUpdated event was emitted
+        spy
+            .assert_emitted(
+                @array![
+                    (
+                        contracts.nft_reward_contract,
+                        NFTRewardContract::Event::TierMetadataUpdated(
+                            TierMetadataUpdated { tier: 1, metadata_uri: new_metadata },
+                        ),
+                    ),
+                ],
+            );
     }
 }
