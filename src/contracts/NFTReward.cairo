@@ -1,7 +1,6 @@
 #[starknet::contract]
 pub mod NFTRewardContract {
     use core::array::ArrayTrait;
-    use core::option::OptionTrait;
     use core::traits::{Into, TryInto};
     use openzeppelin::access::ownable::OwnableComponent;
     use openzeppelin::introspection::src5::SRC5Component;
@@ -13,10 +12,8 @@ pub mod NFTRewardContract {
     };
 
     // Crate imports
-    use crate::events::NFTRewardEvent::{
-        NFTRewardMinted, TierMetadataUpdated, UserEligibleForNewTier, UserTotalContributionUpdated,
-    };
-    use crate::interfaces::ICampaign::{ICampaignDispatcher, ICampaignDispatcherTrait};
+    use crate::events::NFTRewardEvent::{NFTRewardMinted, TierMetadataUpdated};
+    // use crate::interfaces::ICampaign::{ICampaignDispatcher, ICampaignDispatcherTrait};
     use crate::interfaces::IContribution::{IContributionDispatcher, IContributionDispatcherTrait};
     use crate::interfaces::INFTReward::INFTReward;
 
@@ -63,7 +60,7 @@ pub mod NFTRewardContract {
 
     #[event]
     #[derive(Drop, starknet::Event)]
-    enum Event {
+    pub enum Event {
         #[flat]
         ERC721Event: ERC721Component::Event,
         #[flat]
@@ -82,21 +79,23 @@ pub mod NFTRewardContract {
     const TIER_5_THRESHOLD: u32 = 5; // 5 projects supported
 
     // Address Constant
-    const ZERO_ADDRESS: ContractAddress = 0.try_into.unwrap();
+    fn ZERO_ADDRESS() -> ContractAddress {
+        0.try_into().unwrap()
+    }
 
     #[constructor]
     fn constructor(
         ref self: ContractState,
         owner: ContractAddress,
-        name: ByteArray,
-        symbol: ByteArray,
         contribution_contract: ContractAddress,
         campaign_contract: ContractAddress,
+        name: ByteArray,
+        symbol: ByteArray,
     ) {
         // Perform sanity checks
-        assert(owner != ZERO_ADDRESS, 'Zero address forbidden');
-        assert(contribution_contract != ZERO_ADDRESS, 'Zero address forbidden');
-        assert(campaign_contract != ZERO_ADDRESS, 'Zero address forbidden');
+        assert(owner != ZERO_ADDRESS(), 'Zero address forbidden');
+        assert(contribution_contract != ZERO_ADDRESS(), 'Zero address forbidden');
+        assert(campaign_contract != ZERO_ADDRESS(), 'Zero address forbidden');
         assert(name.len() > 0, 'Empty name forbidden');
         assert(symbol.len() > 0, 'Empty symbol forbidden');
 
@@ -124,11 +123,11 @@ pub mod NFTRewardContract {
         /// Mint an NFT reward for an eligible user for a specific campaign
         fn mint_nft_reward(ref self: ContractState, recipient: ContractAddress) {
             // Ensure recipient is not zero address
-            assert(recipient != ZERO_ADDRESS, 'Recipient cannot be zero address');
+            assert(recipient != ZERO_ADDRESS(), 'Recipient is zero address');
 
             // Get the contribution dispatcher
             let contribution_dispatcher = IContributionDispatcher {
-                contract_address: contribution_contract,
+                contract_address: self.contribution_contract.read(),
             };
 
             // Get total contribution count
@@ -247,8 +246,6 @@ pub mod NFTRewardContract {
         /// Get all tiers a user is eligible for but hasn't claimed yet
         fn get_available_tiers(self: @ContractState, user: ContractAddress) -> Array<u8> {
             let contribution_contract = self.contribution_contract.read();
-            assert(contribution_contract != ZERO_ADDRESS, 'Contribution contract not set');
-
             let contribution_dispatcher = IContributionDispatcher {
                 contract_address: contribution_contract,
             };
@@ -295,6 +292,8 @@ pub mod NFTRewardContract {
         ) {
             // Only owner can set contract addresses
             self.ownable.assert_only_owner();
+            assert(contribution_contract != ZERO_ADDRESS(), 'Contribution contract not set');
+
             self.contribution_contract.write(contribution_contract);
         }
 
@@ -302,6 +301,8 @@ pub mod NFTRewardContract {
         fn set_campaign_contract(ref self: ContractState, campaign_contract: ContractAddress) {
             // Only owner can set contract addresses
             self.ownable.assert_only_owner();
+            assert(campaign_contract != ZERO_ADDRESS(), 'Contribution contract not set');
+
             self.campaign_contract.write(campaign_contract);
         }
     }

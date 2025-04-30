@@ -1,7 +1,6 @@
 #[starknet::contract]
 pub mod Contribution {
     use core::array::ArrayTrait;
-    use core::num::traits::Zero;
     use core::option::Option;
     #[event]
     use crowdchain_contracts::events::ContributionEvent::Event;
@@ -39,6 +38,8 @@ pub mod Contribution {
         total_withdrawn: Map<u128, u128>, // campaign_id -> total amount withdrawn
         platform_fee_rate: u128, // fee rate in basis points (e.g., 100 = 1%)
         top_contributors: Vec<ContractAddress>,
+        top_contributors_count: u32, // Count of contributors in the list
+        top_contributors_max_size: u32, // Maximum size of the top contributors list
         admin: ContractAddress,
     }
 
@@ -46,6 +47,8 @@ pub mod Contribution {
     fn constructor(ref self: ContractState, admin: ContractAddress, platform_fee_rate: u128) {
         self.admin.write(admin);
         self.platform_fee_rate.write(platform_fee_rate);
+        self.top_contributors_count.write(0);
+        self.top_contributors_max_size.write(100); // Set max size to 100
     }
 
     #[abi(embed_v0)]
@@ -87,26 +90,51 @@ pub mod Contribution {
                     ),
                 );
 
-            Update top contributors list (simplified: add if not present)
+            // Update top contributors list
             let mut found = false;
             let len = self.top_contributors.len();
             let mut i = 0;
             while i < len {
-                if let Option::Some(addr) = self.top_contributors.get(i) {
-                    if addr == contributor {
+                if let Option::Some(addr_path) = self.top_contributors.get(i) {
+                    let addr_value = addr_path.read();
+                    if addr_value == contributor {
                         found = true;
                         break;
                     }
                 }
                 i += 1;
             }
+
             if !found {
-                // Limit top contributors list to max 100 entries
-                if len >= 100 {
-                    // Remove oldest contributor (index 0)
-                    self.top_contributors.remove(0);
+                let max_size = self.top_contributors_max_size.read();
+                let current_count = self.top_contributors_count.read();
+
+                if current_count < max_size {
+                    // Still have space, just add
+                    self.top_contributors.push(contributor);
+                    self.top_contributors_count.write(current_count + 1);
+                } else if len > 0 {
+                    // We're at capacity, replace oldest contributor
+                    // Shift all elements one position forward (dropping the first one)
+                    let mut j = 0;
+                    while j < len - 1 {
+                        if let (Option::Some(current_path), Option::Some(next_path)) =
+                            (self.top_contributors.get(j), self.top_contributors.get(j + 1)) {
+                            let next_value = next_path.read();
+                            current_path.write(next_value);
+                        }
+                        j += 1;
+                    }
+
+                    // Add new contributor at the end
+                    if let Option::Some(last_path) = self.top_contributors.get(len - 1) {
+                        last_path.write(contributor);
+                    }
+                } else {
+                    // First element in empty list
+                    self.top_contributors.push(contributor);
+                    self.top_contributors_count.write(1);
                 }
-                self.top_contributors.push(contributor);
             }
 
             // Emit updated stats event
