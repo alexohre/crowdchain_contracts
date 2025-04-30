@@ -1,4 +1,3 @@
-use crowdchain_contracts::contracts::Account::AccountContract::User;
 use starknet::ContractAddress;
 
 #[starknet::interface]

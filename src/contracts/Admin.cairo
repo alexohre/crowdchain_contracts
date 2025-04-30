@@ -1,16 +1,16 @@
 #[starknet::contract]
 pub mod Admin {
     use core::num::traits::Zero;
-    use core::starknet::storage::{
-        Map, MutableVecTrait, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
-        StoragePointerWriteAccess, Vec,
-    };
     use openzeppelin::access::accesscontrol::AccessControlComponent;
     use openzeppelin::introspection::src5::SRC5Component;
-    use starknet::{ContractAddress, contract_address_const, get_caller_address};
-    use crate::AdminEvents::{AdminAdded, AdminRemoved, PlatformFeeUpdated};
-    use crate::Interfaces::IAdmin::IAdmin;
-    use crate::structs::Structs::{Creator, Campaign};
+    use starknet::storage::{
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess, Vec,
+    };
+    use starknet::{ContractAddress, get_caller_address};
+    use crate::events::AdminEvents::{AdminAdded, AdminRemoved, PlatformFeeUpdated};
+    use crate::interfaces::IAdmin::IAdmin;
+    use crate::structs::Structs::{Campaign, Creator};
     const ADMIN_ROLE: felt252 = selector!("ADMIN_ROLE");
     const OWNER_ROLE: felt252 = selector!("OWNER_ROLE");
 
@@ -53,7 +53,6 @@ pub mod Admin {
         AccessControlEvent: AccessControlComponent::Event,
     }
 
-
     #[constructor]
     fn constructor(ref self: ContractState, owner: ContractAddress) {
         self.owner.write(owner);
@@ -95,14 +94,13 @@ pub mod Admin {
         }
 
         fn get_user_role(self: @ContractState, user: ContractAddress) -> felt252 {
-            let Check_user_role = self.accesscontrol.has_role(ADMIN_ROLE, user);            
-            if (Check_user_role){
+            let Check_user_role = self.accesscontrol.has_role(ADMIN_ROLE, user);
+            if (Check_user_role) {
                 'Admin'
-            }else{
+            } else {
                 'Not Admin'
             }
         }
-
 
         fn set_platform_fee(ref self: ContractState, new_fee: u256) {
             assert(get_caller_address() == self.owner.read(), 'Unauthorized caller');
@@ -116,16 +114,18 @@ pub mod Admin {
             self.platform_fee.read()
         }
 
-        fn approve_creator_application(ref self: ContractState, creator_address: ContractAddress)-> felt252 {
+        fn approve_creator_application(
+            ref self: ContractState, creator_address: ContractAddress,
+        ) -> felt252 {
             let caller = get_caller_address();
             let check_owner = self.owner.read();
-            assert(caller == check_owner  || self.accesscontrol.has_role(ADMIN_ROLE, caller), 'Caller is not owner or admin');
-        
-            let mut creator_profile = self.creator.read(creator_address);
             assert(
-                creator_profile.status != 'Approved',
-                'Application is approved already',
+                caller == check_owner || self.accesscontrol.has_role(ADMIN_ROLE, caller),
+                'Caller is not owner or admin',
             );
+
+            let mut creator_profile = self.creator.read(creator_address);
+            assert(creator_profile.status != 'Approved', 'Application is approved already');
             creator_profile.status = 'Approved';
 
             // Write the updated profile back to storage
@@ -133,7 +133,9 @@ pub mod Admin {
             'Approved'
         }
 
-        fn reject_creator_application(ref self: ContractState, creator_address: ContractAddress)-> felt252 {
+        fn reject_creator_application(
+            ref self: ContractState, creator_address: ContractAddress,
+        ) -> felt252 {
             let caller = get_caller_address();
             assert(
                 self.accesscontrol.has_role(OWNER_ROLE, caller)
@@ -141,15 +143,12 @@ pub mod Admin {
                 'Caller is not owner or admin',
             );
             let mut creator_profile = self.creator.read(creator_address);
-            assert(
-                creator_profile.status != 'Rejected',
-                'Application is already rejected',
-            );
+            assert(creator_profile.status != 'Rejected', 'Application is already rejected');
             creator_profile.status = 'Rejected';
             'Rejected'
         }
 
-        fn pause_campaign(ref self: ContractState, campaign_id: u256)-> felt252 {
+        fn pause_campaign(ref self: ContractState, campaign_id: u256) -> felt252 {
             let caller = get_caller_address();
             assert(
                 self.accesscontrol.has_role(OWNER_ROLE, caller)
@@ -162,7 +161,7 @@ pub mod Admin {
             campaign.status = 'Paused';
             'Paused'
         }
-        fn unpause_campaign(ref self: ContractState, campaign_id: u256)->felt252 {
+        fn unpause_campaign(ref self: ContractState, campaign_id: u256) -> felt252 {
             let caller = get_caller_address();
             assert(
                 self.accesscontrol.has_role(OWNER_ROLE, caller)
@@ -174,9 +173,9 @@ pub mod Admin {
             assert(campaign.status == 'Paused', 'Campaign is not paused');
             campaign.status = 'Running';
             'Running'
-
         }
-        fn suspend_user(ref self: ContractState, user_address: ContractAddress, reason: felt252) {
+        fn suspend_user(ref self: ContractState, user_address: ContractAddress, reason: felt252)
+        {
             let caller = get_caller_address();
             assert(
                 self.accesscontrol.has_role(OWNER_ROLE, caller)
@@ -192,7 +191,8 @@ pub mod Admin {
                 'Caller is not owner or admin',
             );
         }
-        fn flag_user(ref self: ContractState, user_address: ContractAddress, flag_reason: felt252) {
+        fn flag_user(ref self: ContractState, user_address: ContractAddress, flag_reason:
+        felt252) {
             let caller = get_caller_address();
             assert(
                 self.accesscontrol.has_role(OWNER_ROLE, caller)

@@ -29,7 +29,6 @@ pub mod AccountContract {
         RejectedApplication: RejectedApplication,
     }
 
-
     #[derive(Clone, Debug, Drop, PartialEq, Serde, starknet::Store)]
     pub struct User {
         pub address: ContractAddress,
@@ -39,12 +38,10 @@ pub mod AccountContract {
         pub stats: felt252,
     }
 
-
     #[storage]
     struct Storage {
         accounts: Map<ContractAddress, User>,
     }
-
 
     #[abi(embed_v0)]
     impl IAccountImpl of IAccount<ContractState> {
@@ -160,7 +157,6 @@ pub mod AccountContract {
                     ),
                 );
         }
-
 
         // functon for rejecting applications
         fn reject_application(ref self: ContractState, user: ContractAddress) {

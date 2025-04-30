@@ -128,7 +128,6 @@ pub mod Campaign {
 
 
         fn pause_campaign(ref self: ContractState, campaign_id: u128) {
-
             self.assert_is_admin();
 
             let campaign = self.campaigns.entry(campaign_id);
@@ -170,7 +169,7 @@ pub mod Campaign {
         fn admin_get_campaign_stats(self: @ContractState, campaign_id: u128) -> CamapaignStats {
             self.assert_is_admin();
             let campaign = self.campaigns.entry(campaign_id);
-          
+
             CamapaignStats {
                 campaign_id: campaign_id,
                 status: campaign.status.read(),
