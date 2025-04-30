@@ -6,14 +6,14 @@ pub mod Contribution {
     #[event]
     use crowdchain_contracts::events::ContributionEvent::Event;
     use crowdchain_contracts::events::ContributionEvent::{
-        ContributionProcessed, WithdrawalMade, PlatformFeeCollected, ContributionStatsUpdated,
+        ContributionProcessed, ContributionStatsUpdated, PlatformFeeCollected, WithdrawalMade,
     };
     use crowdchain_contracts::interfaces::IContribution::IContribution;
     use starknet::storage::{
-        Map, MutableVecTrait, StorageMapReadAccess, StoragePathEntry, StoragePointerReadAccess,
-        StoragePointerWriteAccess, Vec, VecTrait,
+        Map, MutableVecTrait, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess,
+        Vec, VecTrait,
     };
-    use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
+    use starknet::{ContractAddress, get_caller_address};
 
     #[derive(Drop, Serde)]
     pub struct ContributionStats {
@@ -29,8 +29,13 @@ pub mod Contribution {
 
     #[storage]
     struct Storage {
-        contributions: Map<(u128, ContractAddress), ContributorNode>, // (campaign_id, contributor) -> stats
+        contributions: Map<
+            u128, Map<ContractAddress, ContributorNode>,
+        >, // (campaign_id, contributor) -> stats
         total_contributions: Map<u128, u128>, // campaign_id -> total amount contributed
+        total_contribution_count: Map<
+            ContractAddress, u32,
+        >, // contributor -> total contribution count
         total_withdrawn: Map<u128, u128>, // campaign_id -> total amount withdrawn
         platform_fee_rate: u128, // fee rate in basis points (e.g., 100 = 1%)
         top_contributors: Vec<ContractAddress>,
@@ -46,39 +51,43 @@ pub mod Contribution {
     #[abi(embed_v0)]
     impl Contribution of IContribution<ContractState> {
         fn process_contribution(
-            ref self: ContractState,
-            campaign_id: u128,
-            contributor: ContractAddress,
-            amount: u128,
+            ref self: ContractState, campaign_id: u128, contributor: ContractAddress, amount: u128,
         ) {
-            assert(amount > 0, 'Contribution amount must be positive');
+            assert(amount > 0, 'Contribution must be positive');
             let caller = get_caller_address();
             assert(caller == contributor, 'Caller must be the contributor');
 
             // Update contributor stats
-            let mut contributor_node = self.contributions.entry((campaign_id, contributor));
+            let mut contributor_node = self.contributions.entry(campaign_id).entry(contributor);
             let prev_contributed = contributor_node.total_contributed.read();
             contributor_node.total_contributed.write(prev_contributed + amount);
 
             // Update total contributions for campaign
-            let prev_total = self.total_contributions.read(campaign_id);
-            self.total_contributions.write(campaign_id, prev_total + amount);
+            let prev_total = self.total_contributions.entry(campaign_id).read();
+            self.total_contributions.entry(campaign_id).write(prev_total + amount);
+
+            // Update total contribution count for contributor
+            let prev_count = self.total_contribution_count.entry(contributor).read();
+            self.total_contribution_count.entry(contributor).write(prev_count + 1);
 
             // Calculate platform fee
             let fee = self.calculate_platform_fee(amount);
-            self.emit(Event::PlatformFeeCollected(PlatformFeeCollected {
-                campaign_id,
-                fee_amount: fee,
-            }));
+            self
+                .emit(
+                    Event::PlatformFeeCollected(
+                        PlatformFeeCollected { campaign_id, fee_amount: fee },
+                    ),
+                );
 
             // Emit contribution processed event
-            self.emit(Event::ContributionProcessed(ContributionProcessed {
-                campaign_id,
-                contributor,
-                amount,
-            }));
+            self
+                .emit(
+                    Event::ContributionProcessed(
+                        ContributionProcessed { campaign_id, contributor, amount },
+                    ),
+                );
 
-            // Update top contributors list (simplified: add if not present)
+            Update top contributors list (simplified: add if not present)
             let mut found = false;
             let len = self.top_contributors.len();
             let mut i = 0;
@@ -101,57 +110,60 @@ pub mod Contribution {
             }
 
             // Emit updated stats event
-            self.emit(Event::ContributionStatsUpdated(ContributionStatsUpdated {
-                campaign_id,
-                contributor,
-                total_contributed: prev_contributed + amount,
-                total_withdrawn: contributor_node.total_withdrawn.read(),
-            }));
+            self
+                .emit(
+                    Event::ContributionStatsUpdated(
+                        ContributionStatsUpdated {
+                            campaign_id,
+                            contributor,
+                            total_contributed: prev_contributed + amount,
+                            total_withdrawn: contributor_node.total_withdrawn.read(),
+                        },
+                    ),
+                );
         }
 
         fn withdraw_funds(
-            ref self: ContractState,
-            campaign_id: u128,
-            recipient: ContractAddress,
-            amount: u128,
+            ref self: ContractState, campaign_id: u128, recipient: ContractAddress, amount: u128,
         ) {
-            assert(amount > 0, 'Withdrawal amount must be positive');
+            assert(amount > 0, 'Withdrawal amount must be >0');
             let caller = get_caller_address();
             assert(caller == recipient, 'Caller must be the recipient');
 
             // Check contributor stats
-            let mut contributor_node = self.contributions.entry((campaign_id, recipient));
+            let mut contributor_node = self.contributions.entry(campaign_id).entry(recipient);
             let contributed = contributor_node.total_contributed.read();
             let withdrawn = contributor_node.total_withdrawn.read();
             let available = contributed - withdrawn;
-            assert(amount <= available, 'Withdrawal amount exceeds available balance');
+            assert(amount <= available, 'Withdrawal amt exceeds balance');
 
             // Update withdrawn amount
             contributor_node.total_withdrawn.write(withdrawn + amount);
 
             // Update total withdrawn for campaign
-            let prev_total_withdrawn = self.total_withdrawn.read(campaign_id);
-            self.total_withdrawn.write(campaign_id, prev_total_withdrawn + amount);
+            let prev_total_withdrawn = self.total_withdrawn.entry(campaign_id).read();
+            self.total_withdrawn.entry(campaign_id).write(prev_total_withdrawn + amount);
 
             // Emit withdrawal event
-            self.emit(Event::WithdrawalMade(WithdrawalMade {
-                campaign_id,
-                recipient,
-                amount,
-            }));
+            self.emit(Event::WithdrawalMade(WithdrawalMade { campaign_id, recipient, amount }));
 
             // Emit updated stats event
-            self.emit(Event::ContributionStatsUpdated(ContributionStatsUpdated {
-                campaign_id,
-                contributor: recipient,
-                total_contributed: contributed,
-                total_withdrawn: withdrawn + amount,
-            }));
+            self
+                .emit(
+                    Event::ContributionStatsUpdated(
+                        ContributionStatsUpdated {
+                            campaign_id,
+                            contributor: recipient,
+                            total_contributed: contributed,
+                            total_withdrawn: withdrawn + amount,
+                        },
+                    ),
+                );
         }
 
         fn calculate_platform_fee(self: @ContractState, amount: u128) -> u128 {
             let fee_rate = self.platform_fee_rate.read();
-            (amount * fee_rate) / 10000u128
+            (amount * fee_rate) / 10000_u128
         }
 
         /// Returns the platform fee rate in basis points (e.g., 100 = 1%)
@@ -160,27 +172,23 @@ pub mod Contribution {
         }
 
         fn get_contribution_stats(
-            self: @ContractState,
-            campaign_id: u128,
-            contributor: ContractAddress,
+            self: @ContractState, campaign_id: u128, contributor: ContractAddress,
         ) -> (u128, u128) {
-            let contributor_node = self.contributions.read((campaign_id, contributor));
-            (
-                contributor_node.total_contributed,
-                contributor_node.total_withdrawn,
-            )
+            let contributor_node = self.contributions.entry(campaign_id).entry(contributor);
+            (contributor_node.total_contributed.read(), contributor_node.total_withdrawn.read())
+        }
+
+        fn get_total_contribution_count(self: @ContractState, contributor: ContractAddress) -> u32 {
+            self.total_contribution_count.entry(contributor).read()
         }
 
         fn get_top_contributors(self: @ContractState) -> Array<ContractAddress> {
             let mut contributors = ArrayTrait::new();
-            let len = self.top_contributors.len();
-            let mut i = 0;
-            while i < len {
-                if let Option::Some(addr) = self.top_contributors.get(i) {
-                    contributors.append(addr);
-                }
-                i += 1;
+
+            for i in 0..self.top_contributors.len() {
+                contributors.append(self.top_contributors.at(i).read());
             }
+
             contributors
         }
     }
@@ -193,5 +201,4 @@ pub mod Contribution {
             assert(caller == admin, 'Caller is not admin');
         }
     }
-}
 }

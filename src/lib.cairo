@@ -4,6 +4,7 @@ pub mod interfaces {
     pub mod IAdmin;
     pub mod ICampaign;
     pub mod IContribution;
+    pub mod INFTReward;
 }
 
 // importing contract
@@ -12,6 +13,7 @@ pub mod contracts {
     pub mod Admin;
     pub mod Campaign;
     pub mod Contribution;
+    pub mod NFTReward;
 }
 
 pub mod structs {
@@ -28,6 +30,7 @@ pub mod events {
     pub mod AdminEvents;
     pub mod CampaignEvent;
     pub mod ContributionEvent;
+    pub mod NFTRewardEvent;
 }
 
 
