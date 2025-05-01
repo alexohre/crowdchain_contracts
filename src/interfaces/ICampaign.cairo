@@ -4,7 +4,9 @@ use starknet::ContractAddress;
 #[starknet::interface]
 pub trait ICampaign<TContractState> {
     fn create_campaign(ref self: TContractState, creator: ContractAddress, metadata: felt252);
-    fn update_campaign_status(ref self: TContractState, campaign_id: u128, new_status: CampaignStatus);
+    fn update_campaign_status(
+        ref self: TContractState, campaign_id: u128, new_status: CampaignStatus,
+    );
     fn pause_campaign(ref self: TContractState, campaign_id: u128);
     fn unpause_campaign(ref self: TContractState, campaign_id: u128);
     fn get_campaign_stats(self: @TContractState, campaign_id: u128) -> CamapaignStats;
