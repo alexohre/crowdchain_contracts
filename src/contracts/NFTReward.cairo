@@ -7,14 +7,11 @@ pub mod NFTRewardContract {
     use openzeppelin::token::erc721::{ERC721Component, ERC721HooksEmptyImpl};
     use starknet::ContractAddress;
     use starknet::storage::{
-        Map, MutableVecTrait, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess,
-        Vec, VecTrait,
+        Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess, Vec, VecTrait,
     };
 
     // Crate imports
     use crate::events::NFTRewardEvent::{NFTRewardMinted, TierMetadataUpdated};
-    // use crate::interfaces::ICampaign::{ICampaignDispatcher, ICampaignDispatcherTrait};
-    use crate::interfaces::IContribution::{IContributionDispatcher, IContributionDispatcherTrait};
     use crate::interfaces::INFTReward::INFTReward;
 
     // Component declarations
@@ -87,14 +84,12 @@ pub mod NFTRewardContract {
     fn constructor(
         ref self: ContractState,
         owner: ContractAddress,
-        contribution_contract: ContractAddress,
         campaign_contract: ContractAddress,
         name: ByteArray,
         symbol: ByteArray,
     ) {
         // Perform sanity checks
         assert(owner != ZERO_ADDRESS(), 'Zero address forbidden');
-        assert(contribution_contract != ZERO_ADDRESS(), 'Zero address forbidden');
         assert(campaign_contract != ZERO_ADDRESS(), 'Zero address forbidden');
         assert(name.len() > 0, 'Empty name forbidden');
         assert(symbol.len() > 0, 'Empty symbol forbidden');
@@ -104,7 +99,6 @@ pub mod NFTRewardContract {
         self.ownable.initializer(owner);
 
         // Set contract addresses
-        self.contribution_contract.write(contribution_contract);
         self.campaign_contract.write(campaign_contract);
 
         // Initialize ERC721 metadata
@@ -121,54 +115,8 @@ pub mod NFTRewardContract {
     #[abi(embed_v0)]
     impl NFTRewardContractImpl of INFTReward<ContractState> {
         /// Mint an NFT reward for an eligible user for a specific campaign
-        fn mint_nft_reward(ref self: ContractState, recipient: ContractAddress) {
-            // Ensure recipient is not zero address
-            assert(recipient != ZERO_ADDRESS(), 'Recipient is zero address');
 
-            // Get the contribution dispatcher
-            let contribution_dispatcher = IContributionDispatcher {
-                contract_address: self.contribution_contract.read(),
-            };
-
-            // Get total contribution count
-            let campaign_count = contribution_dispatcher.get_total_contribution_count(recipient);
-            assert(campaign_count > 0, 'No contributions found');
-
-            // Determine the appropriate tier based on total contribution count
-            let tier = self.get_nft_tier(campaign_count);
-            assert(tier > 0, 'Not eligible for any tier');
-
-            // Check if user has already claimed a reward for this tier
-            let already_claimed = self.reward_claimed.entry(recipient).entry(tier).read();
-            assert(!already_claimed, 'Tier reward already claimed');
-
-            // Get the metadata URI for this tier
-            let metadata_uri = self.tier_metadata.entry(tier).read();
-
-            // Get the next token ID
-            let token_id = self.next_token_id.read();
-            self.next_token_id.write(token_id + 1);
-
-            // Create new NFT reward struct (with campaign_id = 0 for global rewards)
-            let nft_reward = NFTReward { recipient, token_id, tier, claimed: true, metadata_uri };
-
-            // Store the NFT reward
-            self.nft_rewards.entry(token_id).write(nft_reward);
-
-            // Mark that this user has claimed a reward for this tier
-            self.reward_claimed.entry(recipient).entry(tier).write(true);
-
-            // Add the token to the user's owned NFTs
-            let mut user_nfts = self.user_nfts.entry(recipient);
-            user_nfts.push(token_id);
-
-            // Mint the token using the ERC721 component
-            assert(!self.erc721.exists(token_id), 'NFT with id already exists');
-            self.erc721.mint(recipient, token_id);
-
-            // Emit event for minting
-            self.emit(NFTRewardMinted { recipient, token_id, tier, metadata_uri });
-        }
+        fn mint_nft_reward(ref self: ContractState, recipient: ContractAddress) {}
 
         /// Check if a user has claimed a specific tier reward for a campaign
         fn has_claimed_reward(self: @ContractState, user: ContractAddress, tier: u8) -> bool {
@@ -182,27 +130,22 @@ pub mod NFTRewardContract {
             assert(tier >= 1 && tier <= 5, 'Invalid tier: must be 1-5');
 
             // Get the contribution count directly from the Contribution contract
-            let contribution_dispatcher = IContributionDispatcher {
-                contract_address: self.contribution_contract.read(),
-            };
-
-            let campaign_count = contribution_dispatcher.get_total_contribution_count(user);
-
             // Determine tier eligibility based on the number of campaigns the user has contributed
             // to
-            if tier == 1 {
-                campaign_count >= TIER_1_THRESHOLD
-            } else if tier == 2 {
-                campaign_count >= TIER_2_THRESHOLD
-            } else if tier == 3 {
-                campaign_count >= TIER_3_THRESHOLD
-            } else if tier == 4 {
-                campaign_count >= TIER_4_THRESHOLD
-            } else if tier == 5 {
-                campaign_count >= TIER_5_THRESHOLD
-            } else {
-                false
-            }
+            // if tier == 1 {
+            //     campaign_count >= TIER_1_THRESHOLD
+            // } else if tier == 2 {
+            //     campaign_count >= TIER_2_THRESHOLD
+            // } else if tier == 3 {
+            //     campaign_count >= TIER_3_THRESHOLD
+            // } else if tier == 4 {
+            //     campaign_count >= TIER_4_THRESHOLD
+            // } else if tier == 5 {
+            //     campaign_count >= TIER_5_THRESHOLD
+            // } else {
+            //     false
+            // }
+            true
         }
 
         /// Get all NFTs owned by a user
@@ -245,26 +188,8 @@ pub mod NFTRewardContract {
 
         /// Get all tiers a user is eligible for but hasn't claimed yet
         fn get_available_tiers(self: @ContractState, user: ContractAddress) -> Array<u8> {
-            let contribution_contract = self.contribution_contract.read();
-            let contribution_dispatcher = IContributionDispatcher {
-                contract_address: contribution_contract,
-            };
-
-            let campaign_count = contribution_dispatcher.get_total_contribution_count(user);
-            let max_tier = self.get_nft_tier(campaign_count);
-
+            /// to be implemented
             let mut available_tiers = array![];
-
-            // Check each tier from 1 to max_tier
-            let mut tier = 1;
-            while tier <= max_tier {
-                let claimed = self.reward_claimed.entry(user).entry(tier).read();
-                if !claimed {
-                    available_tiers.append(tier);
-                }
-                tier += 1;
-            }
-
             available_tiers
         }
 

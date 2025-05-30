@@ -4,9 +4,9 @@ pub mod Campaign {
     use core::num::traits::Zero;
     use core::option::Option;
     #[event]
-    use crowdchain_contracts::events::CampaignEvent::Event;
     use crowdchain_contracts::events::CampaignEvent::{
-        CampaignCreated, CampaignPaused, CampaignStatsUpdated, CampaignUnpaused,
+        CampaignCreated, CampaignPaused, CampaignUnpaused,
+        CampaignStatusUpdated // add to the list when needed
     };
     use crowdchain_contracts::interfaces::ICampaign::ICampaign;
     use starknet::storage::{
@@ -59,10 +59,21 @@ pub mod Campaign {
         admin: ContractAddress,
     }
 
+    #[event]
+    #[derive(Drop, starknet::Event)]
+    pub enum Event {
+        Created: CampaignCreated,
+        StatusUpdated: CampaignStatusUpdated,
+        Paused: CampaignPaused,
+        Unpaused: CampaignUnpaused,
+        // Add Events after importing it above
+    }
+
     #[constructor]
     fn constructor(ref self: ContractState, admin: ContractAddress) {
         self.admin.write(admin);
     }
+
 
     #[abi(embed_v0)]
     impl Campaign of ICampaign<ContractState> {
@@ -115,8 +126,8 @@ pub mod Campaign {
 
             self
                 .emit(
-                    Event::StatsUpdated(
-                        CampaignStatsUpdated {
+                    Event::StatusUpdated(
+                        CampaignStatusUpdated {
                             campaign_id: campaign_id,
                             status: status,
                             // supporters: campaign.supporters.read(),
