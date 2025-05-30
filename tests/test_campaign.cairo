@@ -1,6 +1,6 @@
-use crowdchain_contracts::contracts::Campaign::Campaign::CampaignStatus;
+use crowdchain_contracts::contracts::Campaign::Campaign::{CampaignStatus, Event};
 use crowdchain_contracts::events::CampaignEvent::{
-    CampaignCreated, CampaignPaused, CampaignStatusUpdated, CampaignUnpaused, Event,
+    CampaignCreated, CampaignPaused, CampaignUnpaused // add to the list when needed
 };
 use crowdchain_contracts::interfaces::ICampaign::{ICampaignDispatcher, ICampaignDispatcherTrait};
 use snforge_std::{
@@ -145,7 +145,7 @@ fn test_non_creator_cannot_update_status() {
 #[test]
 #[should_panic(expected: 'Creator not approved')]
 fn test_cannot_create_campaign_if_not_approved() {
-    let (campaign_dispatcher, contract_address, admin) = setup();
+    let (campaign_dispatcher, contract_address, _) = setup();
     let creator: ContractAddress = contract_address_const::<'creator'>();
 
     start_cheat_caller_address(contract_address, creator);
@@ -468,41 +468,6 @@ fn test_create_campaign_event() {
     stop_cheat_caller_address(contract_address);
 }
 
-
-// #[test]
-// fn test_update_campaign_status_event() {
-//     let (campaign_dispatcher, contract_address, admin) = setup();
-//     let creator: ContractAddress = contract_address_const::<'creator'>();
-//     let mut spy = spy_events();
-
-//     // Setup: create a campaign first
-//     start_cheat_caller_address(contract_address, admin);
-//     campaign_dispatcher.approve_creator(creator);
-//     stop_cheat_caller_address(contract_address);
-
-//     start_cheat_caller_address(contract_address, creator);
-//     campaign_dispatcher.create_campaign(creator, 123);
-//     let campaign_id = campaign_dispatcher.get_last_campaign_id();
-//     stop_cheat_caller_address(contract_address);
-
-//     // Test status update
-//     start_cheat_caller_address(contract_address, creator);
-//     campaign_dispatcher.update_campaign_status(campaign_id, CampaignStatus::Paused);
-//     let stats = campaign_dispatcher.get_campaign_stats(campaign_id);
-//     stop_cheat_caller_address(contract_address);
-
-//     spy
-//         .assert_emitted(
-//             @array![
-//                 (
-//                     contract_address,
-//                     Event::StatusUpdated(
-//                         CampaignStatusUpdated { campaign_id: campaign_id, status: stats.status },
-//                     ),
-//                 ),
-//             ],
-//         );
-// }
 
 #[test]
 fn test_pause_campaign_event() {
