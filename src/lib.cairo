@@ -20,7 +20,6 @@ pub mod events {
     pub mod NFTRewardEvent;
 }
 
-
 // importing tests
 #[cfg(tests)]
 pub mod tests {
