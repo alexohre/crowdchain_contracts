@@ -492,7 +492,12 @@ fn test_pause_campaign_event() {
 
     spy
         .assert_emitted(
-            @array![(contract_address, Event::Paused(CampaignPaused { campaign_id: campaign_id }))],
+            @array![
+                (
+                    contract_address,
+                    Event::HoldCampaign(CampaignPaused { campaign_id: campaign_id }),
+                ),
+            ],
         );
 }
 
@@ -522,7 +527,10 @@ fn test_unpause_campaign_event() {
     spy
         .assert_emitted(
             @array![
-                (contract_address, Event::Unpaused(CampaignUnpaused { campaign_id: campaign_id })),
+                (
+                    contract_address,
+                    Event::UnholdCampaign(CampaignUnpaused { campaign_id: campaign_id }),
+                ),
             ],
         );
 }
