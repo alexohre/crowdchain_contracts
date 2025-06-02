@@ -1,13 +1,11 @@
 // inporting interfaces
 pub mod interfaces {
     pub mod ICampaign;
-    pub mod INFTReward;
 }
 
 // importing contract
 pub mod contracts {
     pub mod Campaign;
-    pub mod NFTReward;
 }
 
 pub mod structs {
