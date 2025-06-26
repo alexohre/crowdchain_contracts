@@ -1,8 +1,8 @@
-use crowdchain_contracts::contracts::Campaign::Campaign::{CamapaignStats, CampaignStatus};
+use crowdchain_contracts::contracts::Crowdchain::Crowdchain::{CamapaignStats, CampaignStatus};
 use starknet::ContractAddress;
 
 #[starknet::interface]
-pub trait ICampaign<TContractState> {
+pub trait ICrowdchain<TContractState> {
     fn create_campaign(ref self: TContractState, creator: ContractAddress, metadata: felt252);
     fn update_campaign_status(
         ref self: TContractState, campaign_id: u128, new_status: CampaignStatus,

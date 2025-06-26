@@ -1,4 +1,4 @@
-use crowdchain_contracts::contracts::Campaign::Campaign::CampaignStatus;
+use crowdchain_contracts::contracts::Crowdchain::Crowdchain::CampaignStatus;
 use starknet::ContractAddress;
 
 

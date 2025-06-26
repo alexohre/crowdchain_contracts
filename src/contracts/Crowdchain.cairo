@@ -1,14 +1,14 @@
 #[starknet::contract]
-pub mod Campaign {
+pub mod Crowdchain {
     use core::array::ArrayTrait;
     use core::num::traits::Zero;
     use core::option::Option;
     #[event]
-    use crowdchain_contracts::events::CampaignEvent::{
+    use crowdchain_contracts::events::CrowdchainEvent::{
         CampaignCreated, CampaignPaused, CampaignUnpaused,
         CampaignStatusUpdated // add to the list when needed
     };
-    use crowdchain_contracts::interfaces::ICampaign::ICampaign;
+    use crowdchain_contracts::interfaces::ICrowdchain::ICrowdchain;
     use starknet::storage::{
         Map, MutableVecTrait, StorageMapReadAccess, StoragePathEntry, StoragePointerReadAccess,
         StoragePointerWriteAccess, Vec, VecTrait,
@@ -74,9 +74,8 @@ pub mod Campaign {
         self.admin.write(admin);
     }
 
-
     #[abi(embed_v0)]
-    impl Campaign of ICampaign<ContractState> {
+    impl Crowdchain of ICrowdchain<ContractState> {
         fn create_campaign(ref self: ContractState, creator: ContractAddress, metadata: felt252) {
             assert(!creator.is_zero(), 'Creator cannot be the 0 address');
             let is_approved = self.approved_creators.read(creator);

@@ -1,20 +1,20 @@
-use crowdchain_contracts::contracts::Campaign::Campaign::{CampaignStatus, Event};
-use crowdchain_contracts::events::CampaignEvent::{
+use crowdchain_contracts::contracts::Crowdchain::Crowdchain::{CampaignStatus, Event};
+use crowdchain_contracts::events::CrowdchainEvent::{
     CampaignCreated, CampaignPaused, CampaignUnpaused // add to the list when needed
 };
-use crowdchain_contracts::interfaces::ICampaign::{ICampaignDispatcher, ICampaignDispatcherTrait};
+use crowdchain_contracts::interfaces::ICrowdchain::{ICrowdchainDispatcher, ICrowdchainDispatcherTrait};
 use snforge_std::{
     ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait, declare, spy_events,
     start_cheat_caller_address, stop_cheat_caller_address,
 };
 use starknet::{ContractAddress, contract_address_const};
 
-fn setup() -> (ICampaignDispatcher, ContractAddress, ContractAddress) {
+fn setup() -> (ICrowdchainDispatcher, ContractAddress, ContractAddress) {
     let admin: ContractAddress = contract_address_const::<'admin'>();
-    let contract = declare("Campaign").unwrap().contract_class();
+    let contract = declare("Crowdchain").unwrap().contract_class();
     let calldata = array![admin.into()];
     let (contract_address, _) = contract.deploy(@calldata).unwrap();
-    let campaign_dispatcher = ICampaignDispatcher { contract_address };
+    let campaign_dispatcher = ICrowdchainDispatcher { contract_address };
     (campaign_dispatcher, contract_address, admin)
 }
 
