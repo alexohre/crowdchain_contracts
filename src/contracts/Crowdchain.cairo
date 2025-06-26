@@ -14,16 +14,12 @@ pub mod Crowdchain {
         CampaignCreated, CampaignPaused, CampaignUnpaused,
         CampaignStatusUpdated // add to the list when needed
     };
-<<<<<<< HEAD:src/contracts/Crowdchain.cairo
     use crowdchain_contracts::interfaces::ICrowdchain::ICrowdchain;
-=======
-    use crowdchain_contracts::interfaces::ICampaign::ICampaign;
     use openzeppelin::access::accesscontrol::{AccessControlComponent, DEFAULT_ADMIN_ROLE};
     use openzeppelin::introspection::src5::SRC5Component;
     use openzeppelin::security::pausable::PausableComponent;
     use openzeppelin::upgrades::UpgradeableComponent;
     use openzeppelin::upgrades::interface::IUpgradeable;
->>>>>>> 206f5bde7da60077f1b400e18ab77ce33129fc80:src/contracts/Campaign.cairo
     use starknet::storage::{
         Map, MutableVecTrait, StorageMapReadAccess, StoragePathEntry, StoragePointerReadAccess,
         StoragePointerWriteAccess, Vec, VecTrait,
@@ -335,6 +331,9 @@ pub mod Crowdchain {
             campaign.metadata.write(metadata);
             campaign.updated_at.write(get_block_timestamp());
         }
+
+        // Add contribute function here
+        
     }
 
     #[generate_trait]
