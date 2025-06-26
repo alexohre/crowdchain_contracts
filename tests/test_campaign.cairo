@@ -2,7 +2,9 @@ use crowdchain_contracts::contracts::Crowdchain::Crowdchain::{CampaignStatus, Ev
 use crowdchain_contracts::events::CrowdchainEvent::{
     CampaignCreated, CampaignPaused, CampaignUnpaused // add to the list when needed
 };
-use crowdchain_contracts::interfaces::ICrowdchain::{ICrowdchainDispatcher, ICrowdchainDispatcherTrait};
+use crowdchain_contracts::interfaces::ICrowdchain::{
+    ICrowdchainDispatcher, ICrowdchainDispatcherTrait,
+};
 use snforge_std::{
     ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait, declare, spy_events,
     start_cheat_caller_address, stop_cheat_caller_address,

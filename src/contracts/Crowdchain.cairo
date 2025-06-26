@@ -331,9 +331,8 @@ pub mod Crowdchain {
             campaign.metadata.write(metadata);
             campaign.updated_at.write(get_block_timestamp());
         }
-
         // Add contribute function here
-        
+
     }
 
     #[generate_trait]
