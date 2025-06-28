@@ -9,33 +9,32 @@ pub struct CampaignCreated {
     #[key]
     pub creator: ContractAddress,
     #[key]
-    pub campaign_id: u128,
-    pub metadata: felt252,
+    pub campaign_id: u64,
     pub status: CampaignStatus,
-    pub supporter_count: u128,
+    pub supporter_count: u64,
 }
 
 // Campaign Status Updated
 #[derive(Drop, starknet::Event)]
 pub struct CampaignStatusUpdated {
     #[key]
-    pub campaign_id: u128,
+    pub campaign_id: u64,
     pub status: CampaignStatus,
-    pub supporter_count: u128,
+    pub supporter_count: u64,
 }
 
 // Campaign Paused
 #[derive(Drop, starknet::Event)]
 pub struct CampaignPaused {
     #[key]
-    pub campaign_id: u128,
+    pub campaign_id: u64,
 }
 
 // Campaign Unpaused
 #[derive(Drop, starknet::Event)]
 pub struct CampaignUnpaused {
     #[key]
-    pub campaign_id: u128,
+    pub campaign_id: u64,
 }
 
 // ******** CONTRIBUTION EVENTS ********* //
@@ -43,31 +42,31 @@ pub struct CampaignUnpaused {
 #[derive(Drop, starknet::Event)]
 pub struct ContributionProcessed {
     #[key]
-    pub campaign_id: u128,
+    pub campaign_id: u64,
     #[key]
     pub contributor: ContractAddress,
-    pub amount: u128,
+    pub amount: u64,
 }
 
 // Withdrawal Made
 #[derive(Drop, starknet::Event)]
 pub struct WithdrawalMade {
     #[key]
-    pub campaign_id: u128,
+    pub campaign_id: u64,
     #[key]
     pub recipient: ContractAddress,
-    pub amount: u128,
+    pub amount: u64,
 }
 
 // contribution Stats Updated
 #[derive(Drop, starknet::Event)]
 pub struct ContributionStatsUpdated {
     #[key]
-    pub campaign_id: u128,
+    pub campaign_id: u64,
     #[key]
     pub contributor: ContractAddress,
-    pub total_contributed: u128,
-    pub total_withdrawn: u128,
+    pub total_contributed: u64,
+    pub total_withdrawn: u64,
 }
 
 
