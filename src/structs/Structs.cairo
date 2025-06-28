@@ -1,3 +1,4 @@
+use crowdchain_contracts::contracts::Crowdchain::Crowdchain::CampaignStatus;
 use starknet::ContractAddress;
 
 #[derive(Drop, Serde, PartialEq, starknet::Store, Clone)]
@@ -12,28 +13,40 @@ pub struct User {
     role: felt252, // 'admin', 'creator', 'donor'
     is_creator: bool,
     total_contributed: u128,
-    campaigns_created: u32,
-    nfts_owned: u32,
+    campaigns_created: u64,
+    nfts_owned: u64,
 }
 
 #[derive(Drop, Serde, starknet::Store, PartialEq)]
 pub struct Campaign {
-    id: u32,
-    creator: ContractAddress,
-    title: felt252,
-    description: felt252,
-    target_amount: u128,
-    amount_raised: u128,
-    start_timestamp: u64,
-    end_timestamp: u64,
-    is_active: bool,
-    contributors_count: u32,
-    rewards_issued: bool,
+    pub id: u64,
+    pub creator: ContractAddress,
+    pub title: ByteArray,
+    pub description: ByteArray,
+    pub goal: u256,
+    pub amount_raised: u256,
+    pub start_timestamp: u64,
+    pub end_timestamp: u64,
+    pub is_active: bool,
+    pub contributors_count: u64,
+    pub rewards_issued: bool,
+}
+
+#[derive(Drop, Serde)]
+pub struct CamapaignStats {
+    pub campaign_id: u64,
+    pub status: CampaignStatus,
+    pub supporter_count: u64,
+    pub creator: ContractAddress,
+    pub created_at: u64,
+    pub updated_at: u64,
+    pub paused_at: u64,
+    pub completed_at: u64,
 }
 
 #[derive(Drop, Serde, starknet::Store)]
 pub struct Contribution {
-    campaign_id: u32,
+    campaign_id: u64,
     contributor: ContractAddress,
     amount: u128,
     timestamp: u64,
@@ -42,7 +55,7 @@ pub struct Contribution {
 
 #[derive(Drop, Serde, starknet::Store, Clone)]
 pub struct NFTReward {
-    campaign_id: u32,
+    campaign_id: u64,
     recipient: ContractAddress,
     token_id: u256,
     tier: u8,

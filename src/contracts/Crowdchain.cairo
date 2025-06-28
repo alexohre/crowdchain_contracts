@@ -15,14 +15,15 @@ pub mod Crowdchain {
         CampaignStatusUpdated // add to the list when needed
     };
     use crowdchain_contracts::interfaces::ICrowdchain::ICrowdchain;
+    use crowdchain_contracts::structs::Structs::{CamapaignStats, Campaign};
     use openzeppelin::access::accesscontrol::{AccessControlComponent, DEFAULT_ADMIN_ROLE};
     use openzeppelin::introspection::src5::SRC5Component;
     use openzeppelin::security::pausable::PausableComponent;
     use openzeppelin::upgrades::UpgradeableComponent;
     use openzeppelin::upgrades::interface::IUpgradeable;
     use starknet::storage::{
-        Map, MutableVecTrait, StorageMapReadAccess, StoragePathEntry, StoragePointerReadAccess,
-        StoragePointerWriteAccess, Vec, VecTrait,
+        Map, StorageMapReadAccess, StoragePathEntry, StoragePointerReadAccess,
+        StoragePointerWriteAccess, Vec,
     };
     use starknet::{ClassHash, ContractAddress, get_block_timestamp, get_caller_address};
     use super::{PAUSER_ROLE, UPGRADER_ROLE};
@@ -56,25 +57,19 @@ pub mod Crowdchain {
         #[substorage(v0)]
         upgradeable: UpgradeableComponent::Storage,
         approved_creators: Map<ContractAddress, bool>,
-        campaigns: Map<u128, CampaignNode>,
-        campaign_counter: u128,
-        campaign_ids: Vec<u128>,
+        campaigns: Map<u64, Campaign>,
+        campaign_status: Map<u64, CampaignStatus>,
+        campaign_supporters: Map<(u64, ContractAddress), bool>,
+        campaign_supporter_count: Map<u64, u64>,
+        campaign_created_at: Map<u64, u64>,
+        campaign_updated_at: Map<u64, u64>,
+        campaign_paused_at: Map<u64, u64>,
+        campaign_completed_at: Map<u64, u64>,
+        campaign_counter: u64,
+        campaign_ids: Vec<u64>,
         admin: ContractAddress,
     }
 
-
-    #[derive(Drop, Serde)]
-    pub struct CamapaignStats {
-        pub campaign_id: u128,
-        pub status: CampaignStatus,
-        pub supporter_count: u128,
-        pub metadata: felt252,
-        pub creator: ContractAddress,
-        pub created_at: u64,
-        pub updated_at: u64,
-        pub paused_at: u64,
-        pub completed_at: u64,
-    }
 
     #[derive(Copy, Drop, Serde, PartialEq, starknet::Store)]
     pub enum CampaignStatus {
@@ -85,18 +80,6 @@ pub mod Crowdchain {
         Unknown,
     }
 
-    #[starknet::storage_node]
-    pub struct CampaignNode {
-        creator: ContractAddress,
-        metadata: felt252,
-        status: CampaignStatus,
-        supporters: Map<ContractAddress, bool>, // To know who supported the campaign
-        supporter_count: u128,
-        created_at: u64,
-        updated_at: u64,
-        paused_at: u64,
-        completed_at: u64,
-    }
 
     #[event]
     #[derive(Drop, starknet::Event)]
@@ -157,151 +140,165 @@ pub mod Crowdchain {
 
     #[abi(embed_v0)]
     impl Crowdchain of ICrowdchain<ContractState> {
-        fn create_campaign(ref self: ContractState, creator: ContractAddress, metadata: felt252) {
+        fn create_campaign(
+            ref self: ContractState,
+            creator: ContractAddress,
+            title: ByteArray,
+            description: ByteArray,
+            goal: u256,
+            image_url: ByteArray,
+        ) -> u64 {
+            // Check if contract is paused
+            self.pausable.assert_not_paused();
             assert(!creator.is_zero(), 'Creator cannot be the 0 address');
             let is_approved = self.approved_creators.read(creator);
             assert(is_approved, 'Creator not approved');
+
             let new_campaign_id = self.campaign_counter.read() + 1;
+            let current_timestamp = get_block_timestamp();
+
+            // Create the full Campaign struct with all details
+            let campaign = Campaign {
+                id: new_campaign_id,
+                creator: creator,
+                title: title,
+                description: description,
+                goal: goal,
+                amount_raised: 0_u256,
+                start_timestamp: current_timestamp,
+                end_timestamp: 0_u64, // Can be set later
+                is_active: true,
+                contributors_count: 0_u64,
+                rewards_issued: false,
+            };
+
+            // Store the campaign and tracking data
+            self.campaigns.entry(new_campaign_id).write(campaign);
+            self.campaign_status.entry(new_campaign_id).write(CampaignStatus::Active);
+            self.campaign_supporter_count.entry(new_campaign_id).write(0);
+            self.campaign_created_at.entry(new_campaign_id).write(current_timestamp);
+            self.campaign_updated_at.entry(new_campaign_id).write(current_timestamp);
+            self.campaign_paused_at.entry(new_campaign_id).write(0);
+            self.campaign_completed_at.entry(new_campaign_id).write(0);
+
+            // Update campaign counter
             self.campaign_counter.write(new_campaign_id);
 
-            let mut campaign = self.campaigns.entry(new_campaign_id);
-            campaign.creator.write(creator);
-            campaign.metadata.write(metadata);
-            campaign.status.write(CampaignStatus::Active);
-            campaign.supporter_count.write(0);
-            campaign.created_at.write(get_block_timestamp());
-            campaign.updated_at.write(get_block_timestamp());
-            campaign.paused_at.write(0);
-            campaign.completed_at.write(0);
-
-            self.campaign_ids.push(new_campaign_id);
-
+            // Emit event
             self
                 .emit(
                     Event::Created(
                         CampaignCreated {
                             campaign_id: new_campaign_id,
                             creator: creator,
-                            metadata: metadata,
                             status: CampaignStatus::Active,
                             supporter_count: 0,
                         },
                     ),
                 );
+
+            new_campaign_id
         }
 
         fn update_campaign_status(
-            ref self: ContractState, campaign_id: u128, new_status: CampaignStatus,
+            ref self: ContractState, campaign_id: u64, new_status: CampaignStatus,
         ) {
             self.assert_is_creator(campaign_id);
-            let campaign = self.campaigns.entry(campaign_id);
-            let status = campaign.status.read();
+            let status = self.campaign_status.entry(campaign_id).read();
             assert(
                 status == CampaignStatus::Active || status == CampaignStatus::Paused,
                 'Invalid status',
             );
 
-            campaign.status.write(new_status);
-            campaign.updated_at.write(get_block_timestamp());
+            self.campaign_status.entry(campaign_id).write(new_status);
+            self.campaign_updated_at.entry(campaign_id).write(get_block_timestamp());
 
             self
                 .emit(
                     Event::StatusUpdated(
                         CampaignStatusUpdated {
                             campaign_id: campaign_id,
-                            status: status,
-                            // supporters: campaign.supporters.read(),
-                            supporter_count: campaign.supporter_count.read(),
+                            status: new_status,
+                            supporter_count: self
+                                .campaign_supporter_count
+                                .entry(campaign_id)
+                                .read(),
                         },
                     ),
                 );
         }
 
-
-        fn pause_campaign(ref self: ContractState, campaign_id: u128) {
+        fn pause_campaign(ref self: ContractState, campaign_id: u64) {
             self.assert_is_admin();
 
-            let campaign = self.campaigns.entry(campaign_id);
-
-            campaign.status.write(CampaignStatus::Paused);
-            campaign.updated_at.write(get_block_timestamp());
-            campaign.paused_at.write(get_block_timestamp());
+            self.campaign_status.entry(campaign_id).write(CampaignStatus::Paused);
+            self.campaign_updated_at.entry(campaign_id).write(get_block_timestamp());
+            self.campaign_paused_at.entry(campaign_id).write(get_block_timestamp());
             self.emit(Event::HoldCampaign(CampaignPaused { campaign_id }));
         }
 
-        fn unpause_campaign(ref self: ContractState, campaign_id: u128) {
+        fn unpause_campaign(ref self: ContractState, campaign_id: u64) {
             self.assert_is_admin();
-            let campaign = self.campaigns.entry(campaign_id);
 
-            campaign.status.write(CampaignStatus::Active);
-            campaign.updated_at.write(get_block_timestamp());
-            campaign.paused_at.write(0);
+            self.campaign_status.entry(campaign_id).write(CampaignStatus::Active);
+            self.campaign_updated_at.entry(campaign_id).write(get_block_timestamp());
+            self.campaign_paused_at.entry(campaign_id).write(0);
 
             self.emit(Event::UnholdCampaign(CampaignUnpaused { campaign_id: campaign_id }));
         }
 
-        fn get_campaign_stats(self: @ContractState, campaign_id: u128) -> CamapaignStats {
+        fn get_campaign_stats(self: @ContractState, campaign_id: u64) -> CamapaignStats {
             self.assert_is_creator(campaign_id);
-            let campaign = self.campaigns.entry(campaign_id);
+            let campaign = self.campaigns.entry(campaign_id).read();
 
             CamapaignStats {
                 campaign_id: campaign_id,
-                status: campaign.status.read(),
-                supporter_count: campaign.supporter_count.read(),
-                metadata: campaign.metadata.read(),
-                creator: campaign.creator.read(),
-                created_at: campaign.created_at.read(),
-                updated_at: campaign.updated_at.read(),
-                paused_at: campaign.paused_at.read(),
-                completed_at: campaign.completed_at.read(),
+                status: self.campaign_status.entry(campaign_id).read(),
+                supporter_count: self.campaign_supporter_count.entry(campaign_id).read(),
+                creator: campaign.creator,
+                created_at: self.campaign_created_at.entry(campaign_id).read(),
+                updated_at: self.campaign_updated_at.entry(campaign_id).read(),
+                paused_at: self.campaign_paused_at.entry(campaign_id).read(),
+                completed_at: self.campaign_completed_at.entry(campaign_id).read(),
             }
         }
 
-        fn admin_get_campaign_stats(self: @ContractState, campaign_id: u128) -> CamapaignStats {
+        fn admin_get_campaign_stats(self: @ContractState, campaign_id: u64) -> CamapaignStats {
             self.assert_is_admin();
-            let campaign = self.campaigns.entry(campaign_id);
+            let campaign = self.campaigns.entry(campaign_id).read();
 
             CamapaignStats {
                 campaign_id: campaign_id,
-                status: campaign.status.read(),
-                supporter_count: campaign.supporter_count.read(),
-                metadata: campaign.metadata.read(),
-                creator: campaign.creator.read(),
-                created_at: campaign.created_at.read(),
-                updated_at: campaign.updated_at.read(),
-                paused_at: campaign.paused_at.read(),
-                completed_at: campaign.completed_at.read(),
+                status: self.campaign_status.entry(campaign_id).read(),
+                supporter_count: self.campaign_supporter_count.entry(campaign_id).read(),
+                creator: campaign.creator,
+                created_at: self.campaign_created_at.entry(campaign_id).read(),
+                updated_at: self.campaign_updated_at.entry(campaign_id).read(),
+                paused_at: self.campaign_paused_at.entry(campaign_id).read(),
+                completed_at: self.campaign_completed_at.entry(campaign_id).read(),
             }
         }
 
-        fn get_top_campaigns(self: @ContractState) -> Array<u128> {
+        fn get_top_campaigns(self: @ContractState) -> Array<u64> {
             let mut top_campaigns = ArrayTrait::new();
-            let mut max_supporters = 0_u128;
-            let mut i = 0;
-            let len = self.campaign_ids.len();
+            let mut max_supporters = 0_u64;
+            let mut i = 1;
+            let campaign_count = self.campaign_counter.read();
 
             // Find the max supporter count
-            while i != len {
-                if let Option::Some(campaign_id_path) = self.campaign_ids.get(i) {
-                    let campaign_id_val = campaign_id_path.read();
-                    let mut campaign = self.campaigns.entry(campaign_id_val);
-                    let supporters = campaign.supporter_count.read();
-                    if supporters > max_supporters {
-                        max_supporters = supporters;
-                    }
+            while i != campaign_count + 1 {
+                let supporters = self.campaign_supporter_count.entry(i).read();
+                if supporters > max_supporters {
+                    max_supporters = supporters;
                 }
                 i += 1;
             }
 
             // Collect all campaigns with max supporter count
-            i = 0;
-            while i != len {
-                if let Option::Some(campaign_id_path) = self.campaign_ids.get(i) {
-                    let campaign_id_val = campaign_id_path.read();
-                    let mut campaign = self.campaigns.entry(campaign_id_val);
-                    if campaign.supporter_count.read() == max_supporters {
-                        top_campaigns.append(campaign_id_val);
-                    }
+            i = 1;
+            while i != campaign_count + 1 {
+                if self.campaign_supporter_count.entry(i).read() == max_supporters {
+                    top_campaigns.append(i);
                 }
                 i += 1;
             }
@@ -314,22 +311,22 @@ pub mod Crowdchain {
             self.approved_creators.entry(creator).write(true);
         }
 
-        fn get_last_campaign_id(self: @ContractState) -> u128 {
+        fn get_last_campaign_id(self: @ContractState) -> u64 {
             self.campaign_counter.read()
         }
 
-        fn add_supporter(ref self: ContractState, campaign_id: u128, supporter: ContractAddress) {
+        fn add_supporter(ref self: ContractState, campaign_id: u64, supporter: ContractAddress) {
             self.assert_is_creator(campaign_id);
-            let campaign = self.campaigns.entry(campaign_id);
-            campaign.supporter_count.write(campaign.supporter_count.read() + 1);
-            campaign.supporters.entry(supporter).write(true);
+            let current_count = self.campaign_supporter_count.entry(campaign_id).read();
+            self.campaign_supporter_count.entry(campaign_id).write(current_count + 1);
+            self.campaign_supporters.entry((campaign_id, supporter)).write(true);
         }
 
-        fn update_campaign_metadata(ref self: ContractState, campaign_id: u128, metadata: felt252) {
+        fn update_campaign_metadata(ref self: ContractState, campaign_id: u64, metadata: felt252) {
+            // This function is kept for interface compatibility but does nothing
+            // since we no longer store metadata as a single felt252 field
             self.assert_is_creator(campaign_id);
-            let campaign = self.campaigns.entry(campaign_id);
-            campaign.metadata.write(metadata);
-            campaign.updated_at.write(get_block_timestamp());
+            // Metadata is now stored as title, description, etc. in the Campaign struct
         }
         // Add contribute function here
 
@@ -343,9 +340,9 @@ pub mod Crowdchain {
             assert(caller == admin, 'Caller is not admin');
         }
 
-        fn assert_is_creator(self: @ContractState, campaign_id: u128) {
-            let campaign = self.campaigns.entry(campaign_id);
-            let creator = campaign.creator.read();
+        fn assert_is_creator(self: @ContractState, campaign_id: u64) {
+            let campaign = self.campaigns.entry(campaign_id).read();
+            let creator = campaign.creator;
             let caller = get_caller_address();
             assert(creator == caller, 'Caller is not the creator');
         }
