@@ -723,3 +723,170 @@ fn test_unpause_campaign_event() {
             ],
         );
 }
+
+#[test]
+fn test_contribute_normal() {
+    let (campaign_dispatcher, contract_address, admin) = setup();
+    let creator = creator_address();
+    let contributor = some_address();
+    let token_contract = declare("MockToken").unwrap().contract_class();
+    let token_calldata = array![contributor.into(), admin.into()];
+    let (token_address, _) = token_contract.deploy(@token_calldata).unwrap();
+
+    start_cheat_caller_address(contract_address, admin);
+    campaign_dispatcher.approve_creator(creator);
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, creator);
+    let campaign_id = campaign_dispatcher.create_campaign(
+        creator,
+        "Test Campaign",
+        "This is a test campaign description",
+        1000_u256,
+        "https://example.com/image.jpg",
+    );
+    stop_cheat_caller_address(contract_address);
+
+    // Approve the contract to spend tokens
+    start_cheat_caller_address(token_address, contributor);
+    let selector: felt252 = 'approve'.into();
+    let approve_result = starknet::call_contract_syscall(
+        token_address,
+        selector,
+        array![contract_address.into(), 1000_u256.into()]
+    );
+    assert(approve_result.is_ok(), 'Approve failed');
+    stop_cheat_caller_address(token_address);
+
+    // Contribute
+    start_cheat_caller_address(contract_address, contributor);
+    campaign_dispatcher.contribute(campaign_id, token_address, 100_u256);
+    stop_cheat_caller_address(contract_address);
+}
+
+#[test]
+#[should_panic(expected: 'Contribution must be greater than zero')]
+fn test_contribute_zero_should_fail() {
+    let (campaign_dispatcher, contract_address, admin) = setup();
+    let creator = creator_address();
+    let contributor = some_address();
+    let token_contract = declare("MockToken").unwrap().contract_class();
+    let token_calldata = array![contributor.into(), admin.into()];
+    let (token_address, _) = token_contract.deploy(@token_calldata).unwrap();
+
+    start_cheat_caller_address(contract_address, admin);
+    campaign_dispatcher.approve_creator(creator);
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, creator);
+    let campaign_id = campaign_dispatcher.create_campaign(
+        creator,
+        "Test Campaign",
+        "This is a test campaign description",
+        1000_u256,
+        "https://example.com/image.jpg",
+    );
+    stop_cheat_caller_address(contract_address);
+
+    // Approve the contract to spend tokens
+    start_cheat_caller_address(token_address, contributor);
+    let selector: felt252 = 'approve'.into();
+    let approve_result = starknet::call_contract_syscall(
+        token_address,
+        selector,
+        array![contract_address.into(), 1000_u256.into()]
+    );
+    assert(approve_result.is_ok(), 'Approve failed');
+    stop_cheat_caller_address(token_address);
+
+    // Contribute zero (should fail)
+    start_cheat_caller_address(contract_address, contributor);
+    campaign_dispatcher.contribute(campaign_id, token_address, 0_u256);
+    stop_cheat_caller_address(contract_address);
+}
+
+#[test]
+#[should_panic(expected: 'Campaign not active')]
+fn test_contribute_inactive_campaign_should_fail() {
+    let (campaign_dispatcher, contract_address, admin) = setup();
+    let creator = creator_address();
+    let contributor = some_address();
+    let token_contract = declare("MockToken").unwrap().contract_class();
+    let token_calldata = array![contributor.into(), admin.into()];
+    let (token_address, _) = token_contract.deploy(@token_calldata).unwrap();
+
+    start_cheat_caller_address(contract_address, admin);
+    campaign_dispatcher.approve_creator(creator);
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, creator);
+    let campaign_id = campaign_dispatcher.create_campaign(
+        creator,
+        "Test Campaign",
+        "This is a test campaign description",
+        1000_u256,
+        "https://example.com/image.jpg",
+    );
+    campaign_dispatcher.update_campaign_status(campaign_id, CampaignStatus::Paused);
+    stop_cheat_caller_address(contract_address);
+
+    // Approve the contract to spend tokens
+    start_cheat_caller_address(token_address, contributor);
+    let selector: felt252 = 'approve'.into();
+    let approve_result = starknet::call_contract_syscall(
+        token_address,
+        selector,
+        array![contract_address.into(), 1000_u256.into()]
+    );
+    assert(approve_result.is_ok(), 'Approve failed');
+    stop_cheat_caller_address(token_address);
+
+    // Contribute to paused campaign (should fail)
+    start_cheat_caller_address(contract_address, contributor);
+    campaign_dispatcher.contribute(campaign_id, token_address, 100_u256);
+    stop_cheat_caller_address(contract_address);
+}
+
+#[test]
+fn test_contribute_emits_event() {
+    let (campaign_dispatcher, contract_address, admin) = setup();
+    let creator = creator_address();
+    let contributor = some_address();
+    let token_contract = declare("MockToken").unwrap().contract_class();
+    let token_calldata = array![contributor.into(), admin.into()];
+    let (token_address, _) = token_contract.deploy(@token_calldata).unwrap();
+
+    start_cheat_caller_address(contract_address, admin);
+    campaign_dispatcher.approve_creator(creator);
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, creator);
+    let campaign_id = campaign_dispatcher.create_campaign(
+        creator,
+        "Test Campaign",
+        "This is a test campaign description",
+        1000_u256,
+        "https://example.com/image.jpg",
+    );
+    stop_cheat_caller_address(contract_address);
+
+    // Approve the contract to spend tokens
+    start_cheat_caller_address(token_address, contributor);
+    let selector: felt252 = 'approve'.into();
+    let approve_result = starknet::call_contract_syscall(
+        token_address,
+        selector,
+        array![contract_address.into(), 1000_u256.into()]
+    );
+    assert(approve_result.is_ok(), 'Approve failed');
+    stop_cheat_caller_address(token_address);
+
+    // Listen for events
+    let mut spy = spy_events();
+    // Contribute
+    start_cheat_caller_address(contract_address, contributor);
+    campaign_dispatcher.contribute(campaign_id, token_address, 100_u256);
+    stop_cheat_caller_address(contract_address);
+    // Assert event
+    spy.assert_emitted(@array![(contract_address, Event::ContributionProcessed(_))]);
+}

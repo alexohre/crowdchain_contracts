@@ -12,7 +12,7 @@ pub mod Crowdchain {
     #[event]
     use crowdchain_contracts::events::CrowdchainEvent::{
         CampaignCreated, CampaignPaused, CampaignUnpaused,
-        CampaignStatusUpdated // add to the list when needed
+        CampaignStatusUpdated, ContributionProcessed // add to the list when needed
     };
     use crowdchain_contracts::interfaces::ICrowdchain::ICrowdchain;
     use crowdchain_contracts::structs::Structs::{CamapaignStats, Campaign};
@@ -25,7 +25,7 @@ pub mod Crowdchain {
         Map, StorageMapReadAccess, StoragePathEntry, StoragePointerReadAccess,
         StoragePointerWriteAccess, Vec,
     };
-    use starknet::{ClassHash, ContractAddress, get_block_timestamp, get_caller_address};
+    use starknet::{ClassHash, ContractAddress, get_block_timestamp, get_caller_address, call_contract_syscall};
     use super::{PAUSER_ROLE, UPGRADER_ROLE};
 
 
@@ -68,6 +68,7 @@ pub mod Crowdchain {
         campaign_counter: u64,
         campaign_ids: Vec<u64>,
         admin: ContractAddress,
+        contributions: Map<(u64, ContractAddress), crowdchain_contracts::structs::Structs::Contribution>,
     }
 
 
@@ -96,6 +97,7 @@ pub mod Crowdchain {
         StatusUpdated: CampaignStatusUpdated,
         HoldCampaign: CampaignPaused,
         UnholdCampaign: CampaignUnpaused,
+        ContributionProcessed: ContributionProcessed,
         // Add Events after importing it above
     }
 
@@ -328,8 +330,65 @@ pub mod Crowdchain {
             self.assert_is_creator(campaign_id);
             // Metadata is now stored as title, description, etc. in the Campaign struct
         }
-        // Add contribute function here
 
+        // Add contribute function here
+        fn contribute(
+            ref self: ContractState,
+            campaign_id: u64,
+            token_address: ContractAddress,
+            amount: u256
+        ) {
+            use starknet::{get_caller_address, call_contract_syscall, get_block_timestamp};
+            use crowdchain_contracts::structs::Structs::Contribution;
+            use crowdchain_contracts::events::CrowdchainEvent::ContributionProcessed;
+            use core::num::traits::Zero;
+            use core::option::OptionTrait;
+            use core::result::ResultTrait;
+            use core::traits::Into;
+            use core::convert::TryInto;
+            use core::u256::U256Trait;
+
+            self.pausable.assert_not_paused();
+            let caller = get_caller_address();
+            assert(amount > 0_u256, 'Contribution must be greater than zero');
+
+            // Check campaign exists and is active
+            let mut campaign = self.campaigns.entry(campaign_id).read();
+            let status = self.campaign_status.entry(campaign_id).read();
+            assert(status == CampaignStatus::Active, 'Campaign not active');
+
+            // Call transfer_from on the token contract
+            let selector: felt252 = 'transfer_from'.into();
+            let call_result = call_contract_syscall(
+                token_address,
+                selector,
+                array![caller.into(), self.contract_address().into(), amount.into()]
+            );
+            assert(call_result.is_ok(), 'Token transfer failed');
+
+            // Update campaign amount_raised and contributors_count
+            campaign.amount_raised = campaign.amount_raised + amount;
+            campaign.contributors_count = campaign.contributors_count + 1_u64;
+            self.campaigns.entry(campaign_id).write(campaign);
+
+            // Record the contribution
+            let timestamp = get_block_timestamp();
+            let contribution = Contribution {
+                campaign_id,
+                contributor: caller,
+                amount: amount.try_into().unwrap(),
+                timestamp,
+                reward_tier: 0u8 // reward logic can be added later
+            };
+            self.contributions.entry((campaign_id, caller)).write(contribution);
+
+            // Emit event
+            self.emit(Event::ContributionProcessed(ContributionProcessed {
+                campaign_id,
+                contributor: caller,
+                amount: amount.try_into().unwrap(),
+            }));
+        }
     }
 
     #[generate_trait]
