@@ -29,38 +29,46 @@ fn creator_address() -> ContractAddress {
 
 // Creator2 address
 fn creator2_address() -> ContractAddress {
-    let creator2_felt: felt252 = 0002.into();
+    let creator2_felt: felt252 = 0003.into();
     let creator2: ContractAddress = creator2_felt.try_into().unwrap();
     creator2
 }
 
 // Non admin address
 fn non_admin_address() -> ContractAddress {
-    let non_admin_felt: felt252 = 0003.into();
+    let non_admin_felt: felt252 = 0004.into();
     let non_admin: ContractAddress = non_admin_felt.try_into().unwrap();
     non_admin
 }
 
 // Non creator address
 fn non_creator_address() -> ContractAddress {
-    let non_creator_felt: felt252 = 0004.into();
+    let non_creator_felt: felt252 = 0005.into();
     let non_creator: ContractAddress = non_creator_felt.try_into().unwrap();
     non_creator
 }
 
 // Some address
 fn some_address() -> ContractAddress {
-    let some_felt: felt252 = 0005.into();
+    let some_felt: felt252 = 0006.into();
     let some: ContractAddress = some_felt.try_into().unwrap();
     some
 }
 
 // Some address
 fn some_address2() -> ContractAddress {
-    let some_felt: felt252 = 0006.into();
+    let some_felt: felt252 = 0007.into();
     let some: ContractAddress = some_felt.try_into().unwrap();
     some
 }
+
+// Some address
+fn some_address3() -> ContractAddress {
+    let some_felt: felt252 = 0008.into();
+    let some: ContractAddress = some_felt.try_into().unwrap();
+    some
+}
+
 
 // ********** END OF ADDRESS FUNCTIONS **********
 
@@ -722,4 +730,147 @@ fn test_unpause_campaign_event() {
                 ),
             ],
         );
+}
+
+
+#[test]
+fn test_get_campaigns() {
+    let (campaign_dispatcher, contract_address, admin) = setup();
+    let creator = creator_address();
+
+    start_cheat_caller_address(contract_address, admin);
+    campaign_dispatcher.approve_creator(creator);
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, creator);
+    let campaign_id1 = campaign_dispatcher
+        .create_campaign(
+            creator, "Campaign 1", "First  campaign", 1000_u256, "https://example.com/image1.jpg",
+        );
+
+    let campaign_id2 = campaign_dispatcher
+        .create_campaign(
+            creator, "Campaign 2", "Second  campaign", 2000_u256, "https://example.com/image2.jpg",
+        );
+
+    let campaign_id3 = campaign_dispatcher
+        .create_campaign(
+            creator, "Campaign 3", "Third  campaign", 3000_u256, "https://example.com/image3.jpg",
+        );
+
+    let campaign_ids = campaign_dispatcher.get_campaigns();
+    stop_cheat_caller_address(contract_address);
+
+    assert(campaign_ids.len() == 3, 'Should be 3  campaigns');
+}
+
+
+#[test]
+fn test_get_featured_campaigns() {
+    let (campaign_dispatcher, contract_address, admin) = setup();
+    let creator = creator_address();
+    let supporter1 = some_address();
+    let supporter2 = some_address2();
+    let supporter3 = some_address3();
+
+    start_cheat_caller_address(contract_address, admin);
+    campaign_dispatcher.approve_creator(creator);
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, creator);
+    let campaign1 = campaign_dispatcher
+        .create_campaign(
+            creator, "Campaign 1", "First campaign", 1000_u256, "https://example.com/1.jpg",
+        );
+
+    let campaign2 = campaign_dispatcher
+        .create_campaign(
+            creator, "Campaign 2", "Second campaign", 2000_u256, "https://example.com/2.jpg",
+        );
+
+    let campaign3 = campaign_dispatcher
+        .create_campaign(
+            creator, "Campaign 3", "Third campaign", 3000_u256, "https://example.com/3.jpg",
+        );
+
+    campaign_dispatcher.add_supporter(campaign1, supporter1);
+
+    campaign_dispatcher.add_supporter(campaign2, supporter1);
+    campaign_dispatcher.add_supporter(campaign2, supporter2);
+    campaign_dispatcher.add_supporter(campaign2, supporter3);
+
+    campaign_dispatcher.add_supporter(campaign3, supporter1);
+    campaign_dispatcher.add_supporter(campaign3, supporter2);
+    campaign_dispatcher.add_supporter(campaign3, supporter3);
+
+    let featured = campaign_dispatcher.get_featured_campaigns();
+    stop_cheat_caller_address(contract_address);
+
+    assert(featured.len() == 2, 'Should return 2 featured camp');
+
+    start_cheat_caller_address(contract_address, admin);
+    campaign_dispatcher.pause_campaign(campaign2);
+    let featured_after_pause = campaign_dispatcher.get_featured_campaigns();
+    stop_cheat_caller_address(contract_address);
+
+    assert(featured_after_pause.len() == 1, 'rtn 1 campaign after pausing');
+}
+
+
+#[test]
+fn test_get_user_campaigns() {
+    let (campaign_dispatcher, contract_address, admin) = setup();
+    let creator1 = creator_address();
+    let creator2 = creator2_address();
+
+    start_cheat_caller_address(contract_address, admin);
+    campaign_dispatcher.approve_creator(creator1);
+    campaign_dispatcher.approve_creator(creator2);
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, creator1);
+    let campaign1_id = campaign_dispatcher
+        .create_campaign(
+            creator1,
+            "Creator1 Campaign 1",
+            "First campaign by creator1",
+            1000_u256,
+            "https://example.com/creator1_1.jpg",
+        );
+
+    let campaign2_id = campaign_dispatcher
+        .create_campaign(
+            creator1,
+            "Creator1 Campaign 2",
+            "Second campaign by creator1",
+            2000_u256,
+            "https://example.com/creator1_2.jpg",
+        );
+    stop_cheat_caller_address(contract_address);
+
+    let creator1_campaigns = campaign_dispatcher.get_user_campaigns(creator1);
+
+    start_cheat_caller_address(contract_address, creator2);
+    let campaign3_id = campaign_dispatcher
+        .create_campaign(
+            creator2,
+            "Creator2 Campaign 1",
+            "First campaign by creator2",
+            3000_u256,
+            "https://example.com/creator2_1.jpg",
+        );
+    stop_cheat_caller_address(contract_address);
+
+    let creator1_campaigns = campaign_dispatcher.get_user_campaigns(creator1);
+    let creator1_count = creator1_campaigns.len();
+    assert(creator1_count == 2, 'Creator1 should have 2  ');
+
+    let creator2_campaigns = campaign_dispatcher.get_user_campaigns(creator2);
+    let creator2_count = creator2_campaigns.len();
+    assert(creator2_count == 1, 'Creator2 shld have 1 campaign,');
+
+    let no_campaigns_user = some_address();
+    let empty_campaigns = campaign_dispatcher.get_user_campaigns(no_campaigns_user);
+    let empty_count = empty_campaigns.len();
+    assert(empty_count == 0, 'Should return empty array');
 }

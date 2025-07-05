@@ -328,6 +328,67 @@ pub mod Crowdchain {
             self.assert_is_creator(campaign_id);
             // Metadata is now stored as title, description, etc. in the Campaign struct
         }
+
+
+        fn get_campaigns(self: @ContractState) -> Array<u64> {
+            let mut campaigns = ArrayTrait::new();
+            let campaign_count = self.campaign_counter.read();
+
+            let mut i = 1;
+            while i <= campaign_count {
+                let campaign = self.campaigns.entry(i).read();
+                campaigns.append(campaign.id);
+                i += 1;
+            }
+
+            campaigns
+        }
+
+        fn get_featured_campaigns(self: @ContractState) -> Array<u64> {
+            let mut featured_campaigns = ArrayTrait::new();
+            let mut max_supporters = 0_u64;
+            let mut i = 1;
+            let campaign_count = self.campaign_counter.read();
+
+            while i != campaign_count + 1 {
+                let status = self.campaign_status.entry(i).read();
+                if status == CampaignStatus::Active {
+                    let supporters = self.campaign_supporter_count.entry(i).read();
+                    if supporters > max_supporters {
+                        max_supporters = supporters;
+                    }
+                }
+                i += 1;
+            }
+
+            i = 1;
+            while i != campaign_count + 1 {
+                let status = self.campaign_status.entry(i).read();
+                if status == CampaignStatus::Active
+                    && self.campaign_supporter_count.entry(i).read() == max_supporters {
+                    featured_campaigns.append(i);
+                }
+                i += 1;
+            }
+
+            featured_campaigns
+        }
+
+        fn get_user_campaigns(self: @ContractState, user: ContractAddress) -> Array<u64> {
+            let mut user_campaigns = ArrayTrait::new();
+            let campaign_count = self.campaign_counter.read();
+
+            let mut i = 1;
+            while i <= campaign_count {
+                let campaign = self.campaigns.entry(i).read();
+                if campaign.creator == user {
+                    user_campaigns.append(campaign.id);
+                }
+                i += 1;
+            }
+
+            user_campaigns
+        }
         // Add contribute function here
 
     }

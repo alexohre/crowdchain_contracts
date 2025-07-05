@@ -25,4 +25,7 @@ pub trait ICrowdchain<TContractState> {
     fn add_supporter(ref self: TContractState, campaign_id: u64, supporter: ContractAddress);
     fn admin_get_campaign_stats(self: @TContractState, campaign_id: u64) -> CamapaignStats;
     fn update_campaign_metadata(ref self: TContractState, campaign_id: u64, metadata: felt252);
+    fn get_campaigns(self: @TContractState) -> Array<u64>;
+    fn get_featured_campaigns(self: @TContractState) -> Array<u64>;
+    fn get_user_campaigns(self: @TContractState, user: ContractAddress) -> Array<u64>;
 }
