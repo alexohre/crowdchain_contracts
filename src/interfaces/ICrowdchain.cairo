@@ -28,4 +28,7 @@ pub trait ICrowdchain<TContractState> {
     fn get_campaigns(self: @TContractState) -> Array<u64>;
     fn get_featured_campaigns(self: @TContractState) -> Array<u64>;
     fn get_user_campaigns(self: @TContractState, user: ContractAddress) -> Array<u64>;
+    fn contribute(
+        ref self: TContractState, campaign_id: u64, amount: u128, token_address: ContractAddress,
+    );
 }

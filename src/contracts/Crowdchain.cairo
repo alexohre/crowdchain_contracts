@@ -11,8 +11,8 @@ pub mod Crowdchain {
     use core::option::Option;
     #[event]
     use crowdchain_contracts::events::CrowdchainEvent::{
-        CampaignCreated, CampaignPaused, CampaignUnpaused,
-        CampaignStatusUpdated // add to the list when needed
+        CampaignCreated, CampaignPaused, CampaignUnpaused, CampaignStatusUpdated,
+        ContributionProcessed // add to the list when needed
     };
     use crowdchain_contracts::interfaces::ICrowdchain::ICrowdchain;
     use crowdchain_contracts::structs::Structs::{CamapaignStats, Campaign};
@@ -25,8 +25,9 @@ pub mod Crowdchain {
         Map, StorageMapReadAccess, StoragePathEntry, StoragePointerReadAccess,
         StoragePointerWriteAccess, Vec,
     };
-    use starknet::{ClassHash, ContractAddress, get_block_timestamp, get_caller_address};
+    use starknet::{ClassHash, ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
     use super::{PAUSER_ROLE, UPGRADER_ROLE};
+    use openzeppelin::token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
 
 
     component!(path: PausableComponent, storage: pausable, event: PausableEvent);
@@ -68,6 +69,7 @@ pub mod Crowdchain {
         campaign_counter: u64,
         campaign_ids: Vec<u64>,
         admin: ContractAddress,
+        contributions: Map<(u64, ContractAddress), u128>,
     }
 
 
@@ -96,6 +98,7 @@ pub mod Crowdchain {
         StatusUpdated: CampaignStatusUpdated,
         HoldCampaign: CampaignPaused,
         UnholdCampaign: CampaignUnpaused,
+        ContributionProcessed: ContributionProcessed,
         // Add Events after importing it above
     }
 
@@ -389,8 +392,44 @@ pub mod Crowdchain {
 
             user_campaigns
         }
-        // Add contribute function here
 
+        fn contribute(ref self: ContractState, campaign_id: u64, amount: u128, token_address: ContractAddress) {
+            self.pausable.assert_not_paused();
+            let status = self.campaign_status.entry(campaign_id).read();
+            assert(status == CampaignStatus::Active, 'Campaign not active');
+            assert(amount > 0, 'contrib>0');
+
+            let caller = get_caller_address();
+            // Convert amount to u256 for ERC20
+            let amount_u256: u256 = amount.into();
+            let contract_address = get_contract_address();
+            // Use IERC20Dispatcher to call transferFrom
+            let mut erc20 = IERC20Dispatcher { contract_address: token_address };
+            erc20.transfer_from(caller, contract_address, amount_u256);
+
+            // Update contributions mapping
+            let prev = self.contributions.entry((campaign_id, caller)).read();
+            let first_time = prev == 0;
+            self.contributions.entry((campaign_id, caller)).write(prev + amount);
+
+            // Update campaign amount_raised and contributors_count
+            let mut campaign = self.campaigns.entry(campaign_id).read();
+            campaign.amount_raised = campaign.amount_raised + amount_u256;
+            if first_time {
+                campaign.contributors_count = campaign.contributors_count + 1;
+                self.campaign_supporter_count.entry(campaign_id).write(
+                    self.campaign_supporter_count.entry(campaign_id).read() + 1
+                );
+                self.campaign_supporters.entry((campaign_id, caller)).write(true);
+            }
+            self.campaigns.entry(campaign_id).write(campaign);
+            self.campaign_updated_at.entry(campaign_id).write(get_block_timestamp());
+            self.emit(Event::ContributionProcessed(ContributionProcessed {
+                campaign_id: campaign_id,
+                contributor: caller,
+                amount: amount.try_into().unwrap(),
+            }));
+        }
     }
 
     #[generate_trait]
