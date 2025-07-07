@@ -1,5 +1,5 @@
 use crowdchain_contracts::contracts::Crowdchain::Crowdchain::{CampaignStatus, Event};
-use crowdchain_contracts::contracts::MockToken::MockToken;
+use crowdchain_contracts::contracts::MockToken::MockTokenDispatcher;
 use crowdchain_contracts::events::CrowdchainEvent::{
     CampaignCreated, CampaignPaused, CampaignUnpaused // add to the list when needed
 };
@@ -84,7 +84,7 @@ fn setup() -> (ICrowdchainDispatcher, ContractAddress, ContractAddress) {
 }
 
 fn setup_with_token() -> (
-    ICrowdchainDispatcher, ContractAddress, ContractAddress, IERC20Dispatcher, ContractAddress,
+    ICrowdchainDispatcher, ContractAddress, ContractAddress, MockTokenDispatcher, ContractAddress,
 ) {
     let admin = admin_address();
     let contract = declare("Crowdchain").unwrap().contract_class();
@@ -96,7 +96,7 @@ fn setup_with_token() -> (
     let token_contract = declare("MockToken").unwrap().contract_class();
     let token_calldata = array![admin.into(), admin.into()];
     let (token_address, _) = token_contract.deploy(@token_calldata).unwrap();
-    let token_dispatcher = IERC20Dispatcher { contract_address: token_address };
+    let token_dispatcher = MockTokenDispatcher { contract_address: token_address };
 
     (campaign_dispatcher, contract_address, admin, token_dispatcher, token_address)
 }
@@ -931,6 +931,7 @@ fn test_contribute_normal() {
 }
 
 #[test]
+#[should_panic]
 fn test_contribute_zero_amount_should_fail() {
     let (campaign_dispatcher, contract_address, admin, token_dispatcher, token_address) =
         setup_with_token();
@@ -940,14 +941,13 @@ fn test_contribute_zero_amount_should_fail() {
     campaign_dispatcher.approve_creator(creator);
     stop_cheat_caller_address(contract_address);
     start_cheat_caller_address(contract_address, creator);
-    let campaign_id = campaign_dispatcher
-        .create_campaign(
-            creator,
-            "Test Campaign",
-            "This is a test campaign description",
-            1000_u256,
-            "https://example.com/image.jpg",
-        );
+    let campaign_id = campaign_dispatcher.create_campaign(
+        creator,
+        "Test Campaign",
+        "This is a test campaign description",
+        1000_u256,
+        "https://example.com/image.jpg",
+    );
     stop_cheat_caller_address(contract_address);
     // Mint tokens to contributor
     start_cheat_caller_address(token_address, admin);
@@ -957,10 +957,9 @@ fn test_contribute_zero_amount_should_fail() {
     start_cheat_caller_address(token_address, contributor);
     token_dispatcher.approve(contract_address, 100_u256);
     stop_cheat_caller_address(token_address);
-    // Contribute zero (should fail)
+    // Contribute zero (should panic)
     start_cheat_caller_address(contract_address, contributor);
-    let result = campaign_dispatcher.contribute(campaign_id, 0, token_address);
-    assert(result.is_err(), 'Zero contribution should fail');
+    campaign_dispatcher.contribute(campaign_id, 0, token_address);
     stop_cheat_caller_address(contract_address);
 }
 // Additional tests for excessive, repeated, and paused/inactive campaigns can be added similarly.
