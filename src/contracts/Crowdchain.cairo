@@ -19,15 +19,17 @@ pub mod Crowdchain {
     use openzeppelin::access::accesscontrol::{AccessControlComponent, DEFAULT_ADMIN_ROLE};
     use openzeppelin::introspection::src5::SRC5Component;
     use openzeppelin::security::pausable::PausableComponent;
+    use openzeppelin::token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
     use openzeppelin::upgrades::UpgradeableComponent;
     use openzeppelin::upgrades::interface::IUpgradeable;
     use starknet::storage::{
         Map, StorageMapReadAccess, StoragePathEntry, StoragePointerReadAccess,
         StoragePointerWriteAccess, Vec,
     };
-    use starknet::{ClassHash, ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
+    use starknet::{
+        ClassHash, ContractAddress, get_block_timestamp, get_caller_address, get_contract_address,
+    };
     use super::{PAUSER_ROLE, UPGRADER_ROLE};
-    use openzeppelin::token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
 
 
     component!(path: PausableComponent, storage: pausable, event: PausableEvent);
@@ -393,7 +395,9 @@ pub mod Crowdchain {
             user_campaigns
         }
 
-        fn contribute(ref self: ContractState, campaign_id: u64, amount: u128, token_address: ContractAddress) {
+        fn contribute(
+            ref self: ContractState, campaign_id: u64, amount: u128, token_address: ContractAddress,
+        ) {
             self.pausable.assert_not_paused();
             let status = self.campaign_status.entry(campaign_id).read();
             assert(status == CampaignStatus::Active, 'Campaign not active');
@@ -417,18 +421,24 @@ pub mod Crowdchain {
             campaign.amount_raised = campaign.amount_raised + amount_u256;
             if first_time {
                 campaign.contributors_count = campaign.contributors_count + 1;
-                self.campaign_supporter_count.entry(campaign_id).write(
-                    self.campaign_supporter_count.entry(campaign_id).read() + 1
-                );
+                self
+                    .campaign_supporter_count
+                    .entry(campaign_id)
+                    .write(self.campaign_supporter_count.entry(campaign_id).read() + 1);
                 self.campaign_supporters.entry((campaign_id, caller)).write(true);
             }
             self.campaigns.entry(campaign_id).write(campaign);
             self.campaign_updated_at.entry(campaign_id).write(get_block_timestamp());
-            self.emit(Event::ContributionProcessed(ContributionProcessed {
-                campaign_id: campaign_id,
-                contributor: caller,
-                amount: amount.try_into().unwrap(),
-            }));
+            self
+                .emit(
+                    Event::ContributionProcessed(
+                        ContributionProcessed {
+                            campaign_id: campaign_id,
+                            contributor: caller,
+                            amount: amount.try_into().unwrap(),
+                        },
+                    ),
+                );
         }
     }
 
