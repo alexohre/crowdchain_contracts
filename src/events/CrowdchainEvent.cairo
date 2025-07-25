@@ -45,7 +45,7 @@ pub struct ContributionProcessed {
     pub campaign_id: u64,
     #[key]
     pub contributor: ContractAddress,
-    pub amount: u64,
+    pub amount: u256,
 }
 
 // Withdrawal Made

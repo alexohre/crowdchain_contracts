@@ -11,21 +11,24 @@ pub mod Crowdchain {
     use core::option::Option;
     #[event]
     use crowdchain_contracts::events::CrowdchainEvent::{
-        CampaignCreated, CampaignPaused, CampaignUnpaused,
-        CampaignStatusUpdated // add to the list when needed
+        CampaignCreated, CampaignPaused, CampaignUnpaused, CampaignStatusUpdated,
+        ContributionProcessed // add to the list when needed
     };
     use crowdchain_contracts::interfaces::ICrowdchain::ICrowdchain;
     use crowdchain_contracts::structs::Structs::{CamapaignStats, Campaign};
     use openzeppelin::access::accesscontrol::{AccessControlComponent, DEFAULT_ADMIN_ROLE};
     use openzeppelin::introspection::src5::SRC5Component;
     use openzeppelin::security::pausable::PausableComponent;
+    use openzeppelin::token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
     use openzeppelin::upgrades::UpgradeableComponent;
     use openzeppelin::upgrades::interface::IUpgradeable;
     use starknet::storage::{
         Map, StorageMapReadAccess, StoragePathEntry, StoragePointerReadAccess,
         StoragePointerWriteAccess, Vec,
     };
-    use starknet::{ClassHash, ContractAddress, get_block_timestamp, get_caller_address};
+    use starknet::{
+        ClassHash, ContractAddress, get_block_timestamp, get_caller_address, get_contract_address,
+    };
     use super::{PAUSER_ROLE, UPGRADER_ROLE};
 
 
@@ -68,6 +71,10 @@ pub mod Crowdchain {
         campaign_counter: u64,
         campaign_ids: Vec<u64>,
         admin: ContractAddress,
+        // Contribution storage
+        contributions: Map<(u64, ContractAddress), u256>,
+        campaign_total_contributions: Map<u64, u256>,
+        user_total_contributions: Map<ContractAddress, u256>,
     }
 
 
@@ -96,6 +103,7 @@ pub mod Crowdchain {
         StatusUpdated: CampaignStatusUpdated,
         HoldCampaign: CampaignPaused,
         UnholdCampaign: CampaignUnpaused,
+        ContributionProcessed: ContributionProcessed,
         // Add Events after importing it above
     }
 
@@ -335,7 +343,7 @@ pub mod Crowdchain {
             let campaign_count = self.campaign_counter.read();
 
             let mut i = 1;
-            while i <= campaign_count {
+            while i != campaign_count + 1 {
                 let campaign = self.campaigns.entry(i).read();
                 campaigns.append(campaign.id);
                 i += 1;
@@ -379,7 +387,7 @@ pub mod Crowdchain {
             let campaign_count = self.campaign_counter.read();
 
             let mut i = 1;
-            while i <= campaign_count {
+            while i != campaign_count + 1 {
                 let campaign = self.campaigns.entry(i).read();
                 if campaign.creator == user {
                     user_campaigns.append(campaign.id);
@@ -389,8 +397,97 @@ pub mod Crowdchain {
 
             user_campaigns
         }
-        // Add contribute function here
+        fn contribute(
+            ref self: ContractState, campaign_id: u64, amount: u256, token_address: ContractAddress,
+        ) {
+            // Check if contract is paused
+            self.pausable.assert_not_paused();
 
+            // Validate inputs
+            assert(campaign_id > 0, 'Invalid campaign ID');
+            assert(amount > 0, 'Amount must be greater than 0');
+            assert(!token_address.is_zero(), 'Invalid token address');
+
+            let contributor = get_caller_address();
+            assert(!contributor.is_zero(), 'Invalid contributor address');
+
+            // Check if campaign exists and is active
+            let campaign = self.campaigns.entry(campaign_id).read();
+            assert(campaign.id == campaign_id, 'Campaign does not exist');
+            assert(campaign.is_active, 'Campaign is not active');
+
+            let campaign_status = self.campaign_status.entry(campaign_id).read();
+            assert(campaign_status == CampaignStatus::Active, 'Campaign is not active');
+
+            // Transfer tokens from contributor to contract
+            let token = IERC20Dispatcher { contract_address: token_address };
+            let success = token.transfer_from(contributor, get_contract_address(), amount);
+            assert(success, 'Token transfer failed');
+
+            // Update contribution storage
+            let current_contribution = self.contributions.entry((campaign_id, contributor)).read();
+            let new_contribution = current_contribution + amount;
+            self.contributions.entry((campaign_id, contributor)).write(new_contribution);
+
+            // Update campaign total contributions
+            let current_campaign_total = self
+                .campaign_total_contributions
+                .entry(campaign_id)
+                .read();
+            let new_campaign_total = current_campaign_total + amount;
+            self.campaign_total_contributions.entry(campaign_id).write(new_campaign_total);
+
+            // Update user total contributions
+            let current_user_total = self.user_total_contributions.entry(contributor).read();
+            let new_user_total = current_user_total + amount;
+            self.user_total_contributions.entry(contributor).write(new_user_total);
+
+            // Update campaign amount_raised
+            let mut updated_campaign = campaign;
+            updated_campaign.amount_raised = updated_campaign.amount_raised + amount;
+            updated_campaign
+                .contributors_count =
+                    if current_contribution == 0 {
+                        updated_campaign.contributors_count + 1
+                    } else {
+                        updated_campaign.contributors_count
+                    };
+            self.campaigns.entry(campaign_id).write(updated_campaign);
+
+            // Add supporter if first time contributing
+            if current_contribution == 0 {
+                self.campaign_supporters.entry((campaign_id, contributor)).write(true);
+                let current_supporter_count = self
+                    .campaign_supporter_count
+                    .entry(campaign_id)
+                    .read();
+                self.campaign_supporter_count.entry(campaign_id).write(current_supporter_count + 1);
+            }
+
+            // Update campaign timestamp
+            let current_timestamp = get_block_timestamp();
+            self.campaign_updated_at.entry(campaign_id).write(current_timestamp);
+
+            // Emit contribution event
+            self
+                .emit(
+                    Event::ContributionProcessed(
+                        ContributionProcessed {
+                            campaign_id: campaign_id, contributor: contributor, amount: amount,
+                        },
+                    ),
+                );
+        }
+
+        fn get_contribution(
+            self: @ContractState, campaign_id: u64, contributor: ContractAddress,
+        ) -> u256 {
+            self.contributions.entry((campaign_id, contributor)).read()
+        }
+
+        fn get_campaign_contributions(self: @ContractState, campaign_id: u64) -> u256 {
+            self.campaign_total_contributions.entry(campaign_id).read()
+        }
     }
 
     #[generate_trait]

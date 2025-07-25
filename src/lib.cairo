@@ -7,6 +7,7 @@ pub mod interfaces {
 // importing contract
 pub mod contracts {
     pub mod Crowdchain;
+    pub mod MockToken;
     pub mod NFTReward;
 }
 

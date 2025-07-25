@@ -743,17 +743,17 @@ fn test_get_campaigns() {
     stop_cheat_caller_address(contract_address);
 
     start_cheat_caller_address(contract_address, creator);
-    let campaign_id1 = campaign_dispatcher
+    campaign_dispatcher
         .create_campaign(
             creator, "Campaign 1", "First  campaign", 1000_u256, "https://example.com/image1.jpg",
         );
 
-    let campaign_id2 = campaign_dispatcher
+    campaign_dispatcher
         .create_campaign(
             creator, "Campaign 2", "Second  campaign", 2000_u256, "https://example.com/image2.jpg",
         );
 
-    let campaign_id3 = campaign_dispatcher
+    campaign_dispatcher
         .create_campaign(
             creator, "Campaign 3", "Third  campaign", 3000_u256, "https://example.com/image3.jpg",
         );
@@ -829,7 +829,7 @@ fn test_get_user_campaigns() {
     stop_cheat_caller_address(contract_address);
 
     start_cheat_caller_address(contract_address, creator1);
-    let campaign1_id = campaign_dispatcher
+    campaign_dispatcher
         .create_campaign(
             creator1,
             "Creator1 Campaign 1",
@@ -838,7 +838,7 @@ fn test_get_user_campaigns() {
             "https://example.com/creator1_1.jpg",
         );
 
-    let campaign2_id = campaign_dispatcher
+    campaign_dispatcher
         .create_campaign(
             creator1,
             "Creator1 Campaign 2",
@@ -848,10 +848,8 @@ fn test_get_user_campaigns() {
         );
     stop_cheat_caller_address(contract_address);
 
-    let creator1_campaigns = campaign_dispatcher.get_user_campaigns(creator1);
-
     start_cheat_caller_address(contract_address, creator2);
-    let campaign3_id = campaign_dispatcher
+    campaign_dispatcher
         .create_campaign(
             creator2,
             "Creator2 Campaign 1",
