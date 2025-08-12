@@ -30,6 +30,7 @@ pub struct Campaign {
     pub is_active: bool,
     pub contributors_count: u64,
     pub rewards_issued: bool,
+    pub token_address: ContractAddress,
 }
 
 #[derive(Drop, Serde)]

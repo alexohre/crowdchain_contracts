@@ -48,6 +48,35 @@ pub struct ContributionProcessed {
     pub amount: u256,
 }
 
+// Funds Withdrawn
+#[derive(Drop, starknet::Event)]
+pub struct FundsWithdrawn {
+    #[key]
+    pub campaign_id: u64,
+    #[key]
+    pub creator: ContractAddress,
+    pub amount: u256,
+    pub platform_fee: u256,
+}
+
+// Campaign Refunded
+#[derive(Drop, starknet::Event)]
+pub struct CampaignRefunded {
+    #[key]
+    pub campaign_id: u64,
+    #[key]
+    pub contributor: ContractAddress,
+    pub amount: u256,
+}
+
+// ******** CREATOR EVENTS ********* //
+// Creator Application Submitted
+#[derive(Drop, starknet::Event)]
+pub struct CreatorApplicationSubmitted {
+    #[key]
+    pub applicant: ContractAddress,
+}
+
 // Withdrawal Made
 #[derive(Drop, starknet::Event)]
 pub struct WithdrawalMade {
