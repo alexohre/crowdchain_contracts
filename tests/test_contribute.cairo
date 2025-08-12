@@ -82,6 +82,7 @@ fn setup_campaign_and_token() -> (ICrowdchainDispatcher, ContractAddress, Contra
             "A test campaign for contribution testing",
             1000000_u256, // goal: 1M tokens
             "https://example.com/image.jpg",
+            token_address,
         );
     stop_cheat_caller_address(contract_address);
 
@@ -111,7 +112,7 @@ fn test_successful_contribution() {
 
     // Make contribution
     start_cheat_caller_address(contract_address, contributor);
-    campaign_dispatcher.contribute(campaign_id, contribution_amount, token_address);
+    campaign_dispatcher.contribute(campaign_id, contribution_amount);
     stop_cheat_caller_address(contract_address);
 
     // Verify token transfer
@@ -167,7 +168,7 @@ fn test_multiple_contributions_same_user() {
     stop_cheat_caller_address(token_address);
 
     start_cheat_caller_address(contract_address, contributor);
-    campaign_dispatcher.contribute(campaign_id, first_amount, token_address);
+    campaign_dispatcher.contribute(campaign_id, first_amount);
     stop_cheat_caller_address(contract_address);
 
     // Second contribution
@@ -176,7 +177,7 @@ fn test_multiple_contributions_same_user() {
     stop_cheat_caller_address(token_address);
 
     start_cheat_caller_address(contract_address, contributor);
-    campaign_dispatcher.contribute(campaign_id, second_amount, token_address);
+    campaign_dispatcher.contribute(campaign_id, second_amount);
     stop_cheat_caller_address(contract_address);
 
     // Verify total contribution
@@ -205,7 +206,7 @@ fn test_multiple_contributors() {
     stop_cheat_caller_address(token_address);
 
     start_cheat_caller_address(contract_address, contributor1);
-    campaign_dispatcher.contribute(campaign_id, amount1, token_address);
+    campaign_dispatcher.contribute(campaign_id, amount1);
     stop_cheat_caller_address(contract_address);
 
     // Second contributor (need to give them tokens first)
@@ -218,7 +219,7 @@ fn test_multiple_contributors() {
     stop_cheat_caller_address(token_address);
 
     start_cheat_caller_address(contract_address, contributor2);
-    campaign_dispatcher.contribute(campaign_id, amount2, token_address);
+    campaign_dispatcher.contribute(campaign_id, amount2);
     stop_cheat_caller_address(contract_address);
 
     // Verify individual contributions
@@ -235,44 +236,40 @@ fn test_multiple_contributors() {
 #[test]
 #[should_panic(expected: 'Invalid campaign ID')]
 fn test_contribute_invalid_campaign_id() {
-    let (campaign_dispatcher, contract_address, token_address, _campaign_id) =
-        setup_campaign_and_token();
+    let (campaign_dispatcher, contract_address, _, _campaign_id) = setup_campaign_and_token();
 
     start_cheat_caller_address(contract_address, contributor_address());
-    campaign_dispatcher.contribute(0, 1000_u256, token_address); // Invalid campaign ID
+    campaign_dispatcher.contribute(0, 1000_u256); // Invalid campaign ID
     stop_cheat_caller_address(contract_address);
 }
 
 #[test]
 #[should_panic(expected: 'Amount must be greater than 0')]
 fn test_contribute_zero_amount() {
-    let (campaign_dispatcher, contract_address, token_address, campaign_id) =
-        setup_campaign_and_token();
+    let (campaign_dispatcher, contract_address, _, campaign_id) = setup_campaign_and_token();
 
     start_cheat_caller_address(contract_address, contributor_address());
-    campaign_dispatcher.contribute(campaign_id, 0_u256, token_address); // Zero amount
+    campaign_dispatcher.contribute(campaign_id, 0_u256); // Zero amount
     stop_cheat_caller_address(contract_address);
 }
 
 #[test]
 #[should_panic(expected: 'Campaign does not exist')]
 fn test_contribute_nonexistent_campaign() {
-    let (campaign_dispatcher, contract_address, token_address, _campaign_id) =
-        setup_campaign_and_token();
+    let (campaign_dispatcher, contract_address, _, _campaign_id) = setup_campaign_and_token();
 
     start_cheat_caller_address(contract_address, contributor_address());
-    campaign_dispatcher.contribute(999, 1000_u256, token_address); // Non-existent campaign
+    campaign_dispatcher.contribute(999, 1000_u256); // Non-existent campaign
     stop_cheat_caller_address(contract_address);
 }
 
 #[test]
 #[should_panic(expected: 'ERC20: insufficient allowance')]
 fn test_contribute_insufficient_allowance() {
-    let (campaign_dispatcher, contract_address, token_address, campaign_id) =
-        setup_campaign_and_token();
+    let (campaign_dispatcher, contract_address, _, campaign_id) = setup_campaign_and_token();
 
     // Don't approve tokens, so transfer should fail
     start_cheat_caller_address(contract_address, contributor_address());
-    campaign_dispatcher.contribute(campaign_id, 1000_u256, token_address);
+    campaign_dispatcher.contribute(campaign_id, 1000_u256);
     stop_cheat_caller_address(contract_address);
 }

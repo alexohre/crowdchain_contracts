@@ -72,19 +72,31 @@ fn some_address3() -> ContractAddress {
 
 // ********** END OF ADDRESS FUNCTIONS **********
 
+// ********** SETUP FUNCTION **********
+
 fn setup() -> (ICrowdchainDispatcher, ContractAddress, ContractAddress) {
-    let admin = admin_address();
     let contract = declare("Crowdchain").unwrap().contract_class();
-    let calldata = array![admin.into()];
-    let (contract_address, _) = contract.deploy(@calldata).unwrap();
+    let admin = admin_address();
+
+    let (contract_address, _) = contract.deploy(@array![admin.into()]).unwrap();
     let campaign_dispatcher = ICrowdchainDispatcher { contract_address };
+
     (campaign_dispatcher, contract_address, admin)
+}
+
+fn deploy_mock_token() -> ContractAddress {
+    let contract = declare("MockToken").unwrap().contract_class();
+    let owner = admin_address();
+    let recipient = admin_address(); // MockToken mints to recipient in constructor
+    let (contract_address, _) = contract.deploy(@array![recipient.into(), owner.into()]).unwrap();
+    contract_address
 }
 
 #[test]
 fn test_admin_set_and_campaign_creation() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
 
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(creator);
@@ -98,6 +110,7 @@ fn test_admin_set_and_campaign_creation() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     let stats = campaign_dispatcher.get_campaign_stats(campaign_id);
     stop_cheat_caller_address(contract_address);
@@ -109,6 +122,7 @@ fn test_admin_set_and_campaign_creation() {
 fn test_only_admin_can_pause() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(creator);
     stop_cheat_caller_address(contract_address);
@@ -120,6 +134,7 @@ fn test_only_admin_can_pause() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     stop_cheat_caller_address(contract_address);
     start_cheat_caller_address(contract_address, admin);
@@ -131,6 +146,7 @@ fn test_only_admin_can_pause() {
 fn test_only_creator_can_update_status() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(creator);
     stop_cheat_caller_address(contract_address);
@@ -142,6 +158,7 @@ fn test_only_creator_can_update_status() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     let status: CampaignStatus = CampaignStatus::Paused;
     campaign_dispatcher.update_campaign_status(campaign_id, status);
@@ -152,6 +169,7 @@ fn test_only_creator_can_update_status() {
 fn test_get_campaign_stats() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(creator);
     stop_cheat_caller_address(contract_address);
@@ -163,6 +181,7 @@ fn test_get_campaign_stats() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     let stats = campaign_dispatcher.get_campaign_stats(campaign_id);
     stop_cheat_caller_address(contract_address);
@@ -174,6 +193,7 @@ fn test_get_campaign_stats() {
 fn test_get_top_campaigns() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(creator);
     stop_cheat_caller_address(contract_address);
@@ -185,6 +205,7 @@ fn test_get_top_campaigns() {
             "This is the first test campaign",
             1000_u256,
             "https://example.com/image1.jpg",
+            token_address,
         );
     campaign_dispatcher
         .create_campaign(
@@ -193,6 +214,7 @@ fn test_get_top_campaigns() {
             "This is the second test campaign",
             2000_u256,
             "https://example.com/image2.jpg",
+            token_address,
         );
     let top_campaigns = campaign_dispatcher.get_top_campaigns();
     stop_cheat_caller_address(contract_address);
@@ -204,6 +226,7 @@ fn test_get_top_campaigns() {
 fn test_non_admin_cannot_pause_unpause() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
     let non_admin = non_admin_address();
 
     start_cheat_caller_address(contract_address, admin);
@@ -218,6 +241,7 @@ fn test_non_admin_cannot_pause_unpause() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     stop_cheat_caller_address(contract_address);
 
@@ -232,6 +256,7 @@ fn test_non_admin_cannot_pause_unpause() {
 fn test_non_creator_cannot_update_status() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
     let non_creator = non_creator_address();
 
     start_cheat_caller_address(contract_address, admin);
@@ -246,6 +271,7 @@ fn test_non_creator_cannot_update_status() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     stop_cheat_caller_address(contract_address);
 
@@ -260,6 +286,7 @@ fn test_non_creator_cannot_update_status() {
 fn test_cannot_create_campaign_if_not_approved() {
     let (campaign_dispatcher, contract_address, _) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
 
     start_cheat_caller_address(contract_address, creator);
     campaign_dispatcher
@@ -269,6 +296,7 @@ fn test_cannot_create_campaign_if_not_approved() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     stop_cheat_caller_address(contract_address);
 }
@@ -293,6 +321,7 @@ fn test_get_stats_for_nonexistent_campaign() {
 fn test_multiple_top_campaigns() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
     let some_address1 = some_address();
     let some_address2 = some_address2();
     start_cheat_caller_address(contract_address, admin);
@@ -307,6 +336,7 @@ fn test_multiple_top_campaigns() {
             "This is the first test campaign",
             1000_u256,
             "https://example.com/image1.jpg",
+            token_address,
         );
     let campaign_id2 = campaign_dispatcher
         .create_campaign(
@@ -315,6 +345,7 @@ fn test_multiple_top_campaigns() {
             "This is the second test campaign",
             2000_u256,
             "https://example.com/image2.jpg",
+            token_address,
         );
 
     // Simulate both campaigns having the same supporter count
@@ -331,6 +362,7 @@ fn test_admin_can_approve_multiple_creators() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator1 = creator_address();
     let creator2 = creator2_address();
+    let token_address = deploy_mock_token();
 
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(creator1);
@@ -345,6 +377,7 @@ fn test_admin_can_approve_multiple_creators() {
             "This is the first test campaign",
             1000_u256,
             "https://example.com/image1.jpg",
+            token_address,
         );
     stop_cheat_caller_address(contract_address);
 
@@ -356,6 +389,7 @@ fn test_admin_can_approve_multiple_creators() {
             "This is the second test campaign",
             2000_u256,
             "https://example.com/image2.jpg",
+            token_address,
         );
     stop_cheat_caller_address(contract_address);
 
@@ -377,7 +411,7 @@ fn test_admin_can_approve_multiple_creators() {
 #[test]
 fn test_campaign_lifecycle() {
     let (campaign_dispatcher, contract_address, admin) = setup();
-
+    let token_address = deploy_mock_token();
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(admin);
 
@@ -388,6 +422,7 @@ fn test_campaign_lifecycle() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     let campaign_id = campaign_dispatcher.get_last_campaign_id();
 
@@ -413,6 +448,7 @@ fn test_campaign_lifecycle() {
 fn test_supporter_logic() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
     let supporter = some_address();
 
     start_cheat_caller_address(contract_address, admin);
@@ -427,6 +463,7 @@ fn test_supporter_logic() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     campaign_dispatcher.add_supporter(campaign_id, supporter);
     let stats = campaign_dispatcher.get_campaign_stats(campaign_id);
@@ -466,7 +503,7 @@ fn test_update_status_nonexistent_campaign() {
 #[should_panic(expected: 'Invalid status')]
 fn test_invalid_status_transitions() {
     let (campaign_dispatcher, contract_address, admin) = setup();
-
+    let token_address = deploy_mock_token();
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(admin);
 
@@ -477,6 +514,7 @@ fn test_invalid_status_transitions() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     let campaign_id = campaign_dispatcher.get_last_campaign_id();
     // Pause twice
@@ -495,7 +533,7 @@ fn test_invalid_status_transitions() {
 fn test_campaign_counter_integrity() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
-
+    let token_address = deploy_mock_token();
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(creator);
     stop_cheat_caller_address(contract_address);
@@ -508,6 +546,7 @@ fn test_campaign_counter_integrity() {
             "This is the first test campaign",
             1000_u256,
             "https://example.com/image1.jpg",
+            token_address,
         );
     let id2 = campaign_dispatcher
         .create_campaign(
@@ -516,14 +555,15 @@ fn test_campaign_counter_integrity() {
             "This is the second test campaign",
             2000_u256,
             "https://example.com/image2.jpg",
+            token_address,
         );
     assert(id2 == id1 + 1, 'Campaign counter not ++');
+    stop_cheat_caller_address(contract_address);
 }
 
 #[test]
 fn test_get_top_campaigns_no_campaigns() {
     let (campaign_dispatcher, contract_address, admin) = setup();
-
     start_cheat_caller_address(contract_address, admin);
     let top_campaigns = campaign_dispatcher.get_top_campaigns();
     assert(top_campaigns.len() == 0, 'Should be empty');
@@ -533,7 +573,7 @@ fn test_get_top_campaigns_no_campaigns() {
 #[test]
 fn test_get_top_campaigns_all_paused_completed() {
     let (campaign_dispatcher, contract_address, admin) = setup();
-
+    let token_address = deploy_mock_token();
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(admin);
 
@@ -544,6 +584,7 @@ fn test_get_top_campaigns_all_paused_completed() {
             "This is the first test campaign",
             1000_u256,
             "https://example.com/image1.jpg",
+            token_address,
         );
     campaign_dispatcher
         .create_campaign(
@@ -552,6 +593,7 @@ fn test_get_top_campaigns_all_paused_completed() {
             "This is the second test campaign",
             2000_u256,
             "https://example.com/image2.jpg",
+            token_address,
         );
     let id1 = campaign_dispatcher.get_last_campaign_id() - 1;
     let id2 = campaign_dispatcher.get_last_campaign_id();
@@ -584,6 +626,7 @@ fn test_only_admin_can_approve_creator() {
 fn test_multiple_actions_sequence() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
 
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(creator);
@@ -597,6 +640,7 @@ fn test_multiple_actions_sequence() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     stop_cheat_caller_address(contract_address);
 
@@ -616,6 +660,7 @@ fn test_multiple_actions_sequence() {
 fn test_create_campaign_event() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
     let mut spy = spy_events();
 
     start_cheat_caller_address(contract_address, admin);
@@ -630,6 +675,7 @@ fn test_create_campaign_event() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
 
     spy
@@ -658,6 +704,7 @@ fn test_create_campaign_event() {
 fn test_pause_campaign_event() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
     let mut spy = spy_events();
 
     // Setup: create a campaign
@@ -673,6 +720,7 @@ fn test_pause_campaign_event() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     stop_cheat_caller_address(contract_address);
 
@@ -696,6 +744,7 @@ fn test_pause_campaign_event() {
 fn test_unpause_campaign_event() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
     let mut spy = spy_events();
 
     // Setup: create and pause a campaign
@@ -711,6 +760,7 @@ fn test_unpause_campaign_event() {
             "This is a test campaign description",
             1000_u256,
             "https://example.com/image.jpg",
+            token_address,
         );
     stop_cheat_caller_address(contract_address);
 
@@ -737,7 +787,7 @@ fn test_unpause_campaign_event() {
 fn test_get_campaigns() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
-
+    let token_address = deploy_mock_token();
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(creator);
     stop_cheat_caller_address(contract_address);
@@ -745,23 +795,38 @@ fn test_get_campaigns() {
     start_cheat_caller_address(contract_address, creator);
     campaign_dispatcher
         .create_campaign(
-            creator, "Campaign 1", "First  campaign", 1000_u256, "https://example.com/image1.jpg",
+            creator,
+            "Campaign 1",
+            "First campaign",
+            1000_u256,
+            "https://example.com/image1.jpg",
+            token_address,
         );
 
     campaign_dispatcher
         .create_campaign(
-            creator, "Campaign 2", "Second  campaign", 2000_u256, "https://example.com/image2.jpg",
+            creator,
+            "Campaign 2",
+            "Second campaign",
+            2000_u256,
+            "https://example.com/image2.jpg",
+            token_address,
         );
 
     campaign_dispatcher
         .create_campaign(
-            creator, "Campaign 3", "Third  campaign", 3000_u256, "https://example.com/image3.jpg",
+            creator,
+            "Campaign 3",
+            "Third campaign",
+            3000_u256,
+            "https://example.com/image3.jpg",
+            token_address,
         );
 
     let campaign_ids = campaign_dispatcher.get_campaigns();
     stop_cheat_caller_address(contract_address);
 
-    assert(campaign_ids.len() == 3, 'Should be 3  campaigns');
+    assert(campaign_ids.len() == 3, 'Should be 3 campaigns');
 }
 
 
@@ -769,6 +834,7 @@ fn test_get_campaigns() {
 fn test_get_featured_campaigns() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator = creator_address();
+    let token_address = deploy_mock_token();
     let supporter1 = some_address();
     let supporter2 = some_address2();
     let supporter3 = some_address3();
@@ -780,17 +846,32 @@ fn test_get_featured_campaigns() {
     start_cheat_caller_address(contract_address, creator);
     let campaign1 = campaign_dispatcher
         .create_campaign(
-            creator, "Campaign 1", "First campaign", 1000_u256, "https://example.com/1.jpg",
+            creator,
+            "Campaign 1",
+            "First campaign",
+            1000_u256,
+            "https://example.com/1.jpg",
+            token_address,
         );
 
     let campaign2 = campaign_dispatcher
         .create_campaign(
-            creator, "Campaign 2", "Second campaign", 2000_u256, "https://example.com/2.jpg",
+            creator,
+            "Campaign 2",
+            "Second campaign",
+            2000_u256,
+            "https://example.com/2.jpg",
+            token_address,
         );
 
     let campaign3 = campaign_dispatcher
         .create_campaign(
-            creator, "Campaign 3", "Third campaign", 3000_u256, "https://example.com/3.jpg",
+            creator,
+            "Campaign 3",
+            "Third campaign",
+            3000_u256,
+            "https://example.com/3.jpg",
+            token_address,
         );
 
     campaign_dispatcher.add_supporter(campaign1, supporter1);
@@ -806,14 +887,14 @@ fn test_get_featured_campaigns() {
     let featured = campaign_dispatcher.get_featured_campaigns();
     stop_cheat_caller_address(contract_address);
 
-    assert(featured.len() == 2, 'Should return 2 featured camp');
+    assert(featured.len() == 2, 'Should return 2 featured camps');
 
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.pause_campaign(campaign2);
     let featured_after_pause = campaign_dispatcher.get_featured_campaigns();
     stop_cheat_caller_address(contract_address);
 
-    assert(featured_after_pause.len() == 1, 'rtn 1 campaign after pausing');
+    assert(featured_after_pause.len() == 1, 'Should return 1 after pausing');
 }
 
 
@@ -822,7 +903,7 @@ fn test_get_user_campaigns() {
     let (campaign_dispatcher, contract_address, admin) = setup();
     let creator1 = creator_address();
     let creator2 = creator2_address();
-
+    let token_address = deploy_mock_token();
     start_cheat_caller_address(contract_address, admin);
     campaign_dispatcher.approve_creator(creator1);
     campaign_dispatcher.approve_creator(creator2);
@@ -836,6 +917,7 @@ fn test_get_user_campaigns() {
             "First campaign by creator1",
             1000_u256,
             "https://example.com/creator1_1.jpg",
+            token_address,
         );
 
     campaign_dispatcher
@@ -845,6 +927,7 @@ fn test_get_user_campaigns() {
             "Second campaign by creator1",
             2000_u256,
             "https://example.com/creator1_2.jpg",
+            token_address,
         );
     stop_cheat_caller_address(contract_address);
 
@@ -856,16 +939,17 @@ fn test_get_user_campaigns() {
             "First campaign by creator2",
             3000_u256,
             "https://example.com/creator2_1.jpg",
+            token_address,
         );
     stop_cheat_caller_address(contract_address);
 
     let creator1_campaigns = campaign_dispatcher.get_user_campaigns(creator1);
     let creator1_count = creator1_campaigns.len();
-    assert(creator1_count == 2, 'Creator1 should have 2  ');
+    assert(creator1_count == 2, 'Creator1 should have 2');
 
     let creator2_campaigns = campaign_dispatcher.get_user_campaigns(creator2);
     let creator2_count = creator2_campaigns.len();
-    assert(creator2_count == 1, 'Creator2 shld have 1 campaign,');
+    assert(creator2_count == 1, 'Creator2 should have 1');
 
     let no_campaigns_user = some_address();
     let empty_campaigns = campaign_dispatcher.get_user_campaigns(no_campaigns_user);

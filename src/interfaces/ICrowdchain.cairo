@@ -11,6 +11,7 @@ pub trait ICrowdchain<TContractState> {
         description: ByteArray,
         goal: u256,
         image_url: ByteArray,
+        token_address: ContractAddress,
     ) -> u64;
     // fn get_campaign(self: @TContractState, campaign_id: u64) -> Array<Campaigns>;
     fn update_campaign_status(
@@ -28,9 +29,7 @@ pub trait ICrowdchain<TContractState> {
     fn get_campaigns(self: @TContractState) -> Array<u64>;
     fn get_featured_campaigns(self: @TContractState) -> Array<u64>;
     fn get_user_campaigns(self: @TContractState, user: ContractAddress) -> Array<u64>;
-    fn contribute(
-        ref self: TContractState, campaign_id: u64, amount: u256, token_address: ContractAddress,
-    );
+    fn contribute(ref self: TContractState, campaign_id: u64, amount: u256);
     fn get_contribution(
         self: @TContractState, campaign_id: u64, contributor: ContractAddress,
     ) -> u256;
@@ -48,4 +47,35 @@ pub trait ICrowdchain<TContractState> {
     fn get_admin_count(self: @TContractState) -> u32;
     fn get_admin_by_index(self: @TContractState, index: u32) -> ContractAddress;
     fn get_all_admins(self: @TContractState) -> Array<ContractAddress>;
+
+    // Fund withdrawal and platform fee functions
+    fn withdraw_campaign_funds(ref self: TContractState, campaign_id: u64);
+    /// Refund contributors for fraudulent campaigns (owner/admin only)
+    fn refund_campaign(
+        ref self: TContractState, campaign_id: u64, contributors: Array<ContractAddress>,
+    );
+    fn get_campaign_funds_by_token(
+        self: @TContractState, campaign_id: u64, token_address: ContractAddress,
+    ) -> u256;
+    fn get_campaign_token(self: @TContractState, campaign_id: u64) -> ContractAddress;
+    fn is_campaign_disbursed(self: @TContractState, campaign_id: u64) -> bool;
+    fn get_platform_fees_collected(
+        self: @TContractState, campaign_id: u64, token_address: ContractAddress,
+    ) -> u256;
+    fn update_platform_fee_settings(
+        ref self: TContractState,
+        fee_percentage: u256,
+        fee_threshold: u256,
+        platform_wallet: ContractAddress,
+    );
+    fn get_platform_fee_settings(self: @TContractState) -> (u256, u256, ContractAddress);
+    fn register_token_decimals(
+        ref self: TContractState, token_address: ContractAddress, decimals: u8,
+    );
+    fn get_token_decimals(self: @TContractState, token_address: ContractAddress) -> u8;
+
+
+    // Creator application functions
+    fn submit_creator_application(ref self: TContractState);
+    fn is_creator_application_pending(self: @TContractState, address: ContractAddress) -> bool;
 }

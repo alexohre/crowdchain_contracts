@@ -8,12 +8,12 @@ const ADMIN_ROLE: felt252 = selector!("ADMIN_ROLE");
 #[starknet::contract]
 pub mod Crowdchain {
     use core::array::ArrayTrait;
-    use core::num::traits::Zero;
+    use core::num::traits::{Pow, Zero};
     use core::option::Option;
     #[event]
     use crowdchain_contracts::events::CrowdchainEvent::{
-        CampaignCreated, CampaignPaused, CampaignUnpaused, CampaignStatusUpdated,
-        ContributionProcessed // add to the list when needed
+        CampaignCreated, CampaignPaused, CampaignRefunded, CampaignStatusUpdated, CampaignUnpaused,
+        ContributionProcessed, CreatorApplicationSubmitted, FundsWithdrawn,
     };
     use crowdchain_contracts::interfaces::ICrowdchain::ICrowdchain;
     use crowdchain_contracts::structs::Structs::{CamapaignStats, Campaign};
@@ -76,10 +76,22 @@ pub mod Crowdchain {
         admins: Map<ContractAddress, bool>, // Store admin addresses
         admin_addresses: Map<u32, ContractAddress>, // Store admin addresses by index
         admin_count: u32, // Keep track of total admins
+        // Creator application storage
+        pending_creator_applications: Map<ContractAddress, bool>, // Track pending applications
         // Contribution storage
         contributions: Map<(u64, ContractAddress), u256>,
         campaign_total_contributions: Map<u64, u256>,
         user_total_contributions: Map<ContractAddress, u256>,
+        // Platform fee and fund management
+        platform_fee_percentage: u256, // Fee percentage (e.g., 250 = 2.5%)
+        platform_fee_threshold: u256, // Minimum campaign goal for fee (e.g., 1000 tokens)
+        platform_wallet: ContractAddress, // Wallet to receive platform fees
+        campaign_funds: Map<(u64, ContractAddress), u256>, // Track funds by campaign and token
+        campaign_disbursed: Map<u64, bool>, // Track if campaign funds have been disbursed
+        platform_fees_collected: Map<
+            (u64, ContractAddress), u256,
+        >, // Track fees collected per campaign/token
+        token_decimals: Map<ContractAddress, u8> // Track token decimals (USDC: 6, ETH/STARK: 18)
     }
 
 
@@ -109,6 +121,9 @@ pub mod Crowdchain {
         HoldCampaign: CampaignPaused,
         UnholdCampaign: CampaignUnpaused,
         ContributionProcessed: ContributionProcessed,
+        CreatorApplicationSubmitted: CreatorApplicationSubmitted,
+        FundsWithdrawn: FundsWithdrawn,
+        CampaignRefunded: CampaignRefunded,
         // Add Events after importing it above
     }
 
@@ -121,10 +136,16 @@ pub mod Crowdchain {
         self.accesscontrol._grant_role(PAUSER_ROLE, owner);
         self.accesscontrol._grant_role(UPGRADER_ROLE, owner);
 
-        // Initialize admin tracking system
+        // Set the contract owner
         self.owner.write(owner);
-        // Owner is not counted as an admin in the admin tracking system
+
+        // Initialize admin count
         self.admin_count.write(0);
+
+        // Initialize platform fee settings (2.5% fee for campaigns >= 1000 tokens)
+        self.platform_fee_percentage.write(250); // 2.5% = 250/10000
+        self.platform_fee_threshold.write(1000 * 1000000000000000000); // 1000 tokens (18 decimals)
+        self.platform_wallet.write(owner); // Initially set to owner, can be changed later
     }
 
     #[generate_trait]
@@ -164,12 +185,17 @@ pub mod Crowdchain {
             description: ByteArray,
             goal: u256,
             image_url: ByteArray,
+            token_address: ContractAddress,
         ) -> u64 {
             // Check if contract is paused
             self.pausable.assert_not_paused();
             assert(!creator.is_zero(), 'Creator cannot be the 0 address');
+
             let is_approved = self.approved_creators.read(creator);
             assert(is_approved, 'Creator not approved');
+
+            // Validate token address is not zero
+            assert(!token_address.is_zero(), 'Invalid token address');
 
             let new_campaign_id = self.campaign_counter.read() + 1;
             let current_timestamp = get_block_timestamp();
@@ -187,6 +213,7 @@ pub mod Crowdchain {
                 is_active: true,
                 contributors_count: 0_u64,
                 rewards_issued: false,
+                token_address: token_address,
             };
 
             // Store the campaign and tracking data
@@ -324,8 +351,33 @@ pub mod Crowdchain {
         }
 
         fn approve_creator(ref self: ContractState, creator: ContractAddress) {
-            self.assert_is_admin();
+            assert(self.is_admin_or_owner(get_caller_address()), 'Caller is not admin');
             self.approved_creators.entry(creator).write(true);
+            // Remove from pending applications when approved
+            self.pending_creator_applications.entry(creator).write(false);
+        }
+
+        fn submit_creator_application(ref self: ContractState) {
+            let caller = get_caller_address();
+
+            // Check if already approved
+            assert(!self.approved_creators.entry(caller).read(), 'Already approved creator');
+
+            // Check if already has pending application
+            assert(
+                !self.pending_creator_applications.entry(caller).read(),
+                'Application already pending',
+            );
+
+            // Mark as pending application
+            self.pending_creator_applications.entry(caller).write(true);
+
+            // Emit event for application submission
+            self.emit(CreatorApplicationSubmitted { applicant: caller });
+        }
+
+        fn is_creator_application_pending(self: @ContractState, address: ContractAddress) -> bool {
+            self.pending_creator_applications.entry(address).read()
         }
 
         fn get_last_campaign_id(self: @ContractState) -> u64 {
@@ -406,16 +458,13 @@ pub mod Crowdchain {
 
             user_campaigns
         }
-        fn contribute(
-            ref self: ContractState, campaign_id: u64, amount: u256, token_address: ContractAddress,
-        ) {
+        fn contribute(ref self: ContractState, campaign_id: u64, amount: u256) {
             // Check if contract is paused
             self.pausable.assert_not_paused();
 
             // Validate inputs
             assert(campaign_id > 0, 'Invalid campaign ID');
             assert(amount > 0, 'Amount must be greater than 0');
-            assert(!token_address.is_zero(), 'Invalid token address');
 
             let contributor = get_caller_address();
             assert(!contributor.is_zero(), 'Invalid contributor address');
@@ -427,6 +476,10 @@ pub mod Crowdchain {
 
             let campaign_status = self.campaign_status.entry(campaign_id).read();
             assert(campaign_status == CampaignStatus::Active, 'Campaign is not active');
+
+            // Use the campaign's stored token address
+            let token_address = campaign.token_address;
+            assert(!token_address.is_zero(), 'Campaign has invalid token');
 
             // Transfer tokens from contributor to contract
             let token = IERC20Dispatcher { contract_address: token_address };
@@ -450,6 +503,14 @@ pub mod Crowdchain {
             let current_user_total = self.user_total_contributions.entry(contributor).read();
             let new_user_total = current_user_total + amount;
             self.user_total_contributions.entry(contributor).write(new_user_total);
+
+            // Track campaign funds (simplified for single token)
+            let current_campaign_funds = self
+                .campaign_funds
+                .entry((campaign_id, token_address))
+                .read();
+            let new_campaign_funds = current_campaign_funds + amount;
+            self.campaign_funds.entry((campaign_id, token_address)).write(new_campaign_funds);
 
             // Update campaign amount_raised
             let mut updated_campaign = campaign;
@@ -497,6 +558,237 @@ pub mod Crowdchain {
         fn get_campaign_contributions(self: @ContractState, campaign_id: u64) -> u256 {
             self.campaign_total_contributions.entry(campaign_id).read()
         }
+
+        /// @notice Withdraw campaign funds by creator (goal reached or campaign ended)
+        /// @param campaign_id The ID of the campaign to withdraw funds from
+        fn withdraw_campaign_funds(ref self: ContractState, campaign_id: u64) {
+            // Check if contract is paused
+            self.pausable.assert_not_paused();
+
+            // Validate campaign exists
+            let campaign = self.campaigns.entry(campaign_id).read();
+            assert(campaign.id == campaign_id, 'Campaign does not exist');
+
+            // Check if funds already disbursed
+            assert(!self.campaign_disbursed.entry(campaign_id).read(), 'Funds already disbursed');
+
+            // Check if campaign goal is reached OR campaign has ended
+            let current_timestamp = get_block_timestamp();
+            let goal_reached = campaign.amount_raised >= campaign.goal;
+            let campaign_ended = current_timestamp >= campaign.end_timestamp;
+
+            assert(goal_reached || campaign_ended, 'Campaign not ready');
+
+            // Only creator can withdraw funds
+            let caller = get_caller_address();
+            assert(caller == campaign.creator, 'Not the campaign creator');
+
+            // Disburse the single token used by the campaign
+            let token_address = campaign.token_address;
+            let total_funds = self.campaign_funds.entry((campaign_id, token_address)).read();
+
+            if total_funds > 0 {
+                // Calculate platform fee if applicable
+                let platform_fee = self
+                    ._calculate_platform_fee(campaign.goal, total_funds, token_address);
+                let creator_amount = total_funds - platform_fee;
+
+                // Transfer platform fee if applicable
+                if platform_fee > 0 {
+                    let token = IERC20Dispatcher { contract_address: token_address };
+                    let platform_wallet = self.platform_wallet.read();
+                    let fee_success = token.transfer(platform_wallet, platform_fee);
+                    assert(fee_success, 'Platform fee transfer failed');
+
+                    // Track platform fees collected
+                    let current_fees = self
+                        .platform_fees_collected
+                        .entry((campaign_id, token_address))
+                        .read();
+                    self
+                        .platform_fees_collected
+                        .entry((campaign_id, token_address))
+                        .write(current_fees + platform_fee);
+                }
+
+                // Transfer remaining funds to creator
+                if creator_amount > 0 {
+                    let token = IERC20Dispatcher { contract_address: token_address };
+                    let creator_success = token.transfer(campaign.creator, creator_amount);
+                    assert(creator_success, 'Creator transfer failed');
+                }
+            }
+
+            // Mark campaign as disbursed
+            self.campaign_disbursed.entry(campaign_id).write(true);
+
+            // Update campaign status to completed
+            self.campaign_status.entry(campaign_id).write(CampaignStatus::Completed);
+            let current_timestamp = get_block_timestamp();
+            self.campaign_completed_at.entry(campaign_id).write(current_timestamp);
+
+            // Emit FundsWithdrawn event
+            let platform_fee = self
+                ._calculate_platform_fee(campaign.goal, total_funds, token_address);
+            let creator_amount = total_funds - platform_fee;
+            self
+                .emit(
+                    Event::FundsWithdrawn(
+                        FundsWithdrawn {
+                            campaign_id,
+                            creator: campaign.creator,
+                            amount: creator_amount,
+                            platform_fee,
+                        },
+                    ),
+                );
+        }
+
+        /// @notice Refund contributors for fraudulent campaigns
+        /// @dev This function should ONLY be used when a campaign is determined to be fraudulent
+        /// @dev by the contract owner or admins. It is NOT for campaigns that simply failed to
+        /// reach their goal.
+        /// @param campaign_id The ID of the fraudulent campaign to refund
+        /// @param contributors Array of contributor addresses to refund
+        fn refund_campaign(
+            ref self: ContractState, campaign_id: u64, contributors: Array<ContractAddress>,
+        ) {
+            // Check if contract is paused
+            self.pausable.assert_not_paused();
+
+            // Validate campaign exists
+            let campaign = self.campaigns.entry(campaign_id).read();
+            assert(campaign.id == campaign_id, 'Campaign does not exist');
+
+            // Check if funds already disbursed
+            assert(!self.campaign_disbursed.entry(campaign_id).read(), 'Funds already disbursed');
+
+            // Only owner or admin can initiate refunds for fraudulent campaigns
+            assert(self.is_admin_or_owner(get_caller_address()), 'Not authorized to refund');
+
+            // Refund each contributor using the campaign's single token
+            let token_address = campaign.token_address;
+            let mut i = contributors.len();
+            while i != 0 {
+                i -= 1;
+                let contributor = *contributors.at(i);
+                let contribution_amount = self
+                    .contributions
+                    .entry((campaign_id, contributor))
+                    .read();
+
+                if contribution_amount > 0 {
+                    let token = IERC20Dispatcher { contract_address: token_address };
+                    let refund_success = token.transfer(contributor, contribution_amount);
+                    assert(refund_success, 'Refund transfer failed');
+
+                    // Clear contributor's contribution record
+                    self.contributions.entry((campaign_id, contributor)).write(0);
+
+                    // Emit CampaignRefunded event for each contributor
+                    self
+                        .emit(
+                            Event::CampaignRefunded(
+                                CampaignRefunded {
+                                    campaign_id, contributor, amount: contribution_amount,
+                                },
+                            ),
+                        );
+                }
+            }
+
+            // Mark campaign as disbursed (refunded)
+            self.campaign_disbursed.entry(campaign_id).write(true);
+        }
+
+        /// @notice Get campaign funds by token
+        /// @param campaign_id The campaign ID
+        /// @param token_address The token contract address
+        /// @return The amount of funds in the specified token
+        fn get_campaign_funds_by_token(
+            self: @ContractState, campaign_id: u64, token_address: ContractAddress,
+        ) -> u256 {
+            self.campaign_funds.entry((campaign_id, token_address)).read()
+        }
+
+        /// @notice Get the token address used by a campaign
+        /// @param campaign_id The campaign ID
+        /// @return The token contract address used by the campaign
+        fn get_campaign_token(self: @ContractState, campaign_id: u64) -> ContractAddress {
+            let campaign = self.campaigns.entry(campaign_id).read();
+            campaign.token_address
+        }
+
+        /// @notice Check if campaign funds have been disbursed
+        /// @param campaign_id The campaign ID
+        /// @return True if funds have been disbursed
+        fn is_campaign_disbursed(self: @ContractState, campaign_id: u64) -> bool {
+            self.campaign_disbursed.entry(campaign_id).read()
+        }
+
+        /// @notice Get platform fees collected for a campaign and token
+        /// @param campaign_id The campaign ID
+        /// @param token_address The token contract address
+        /// @return The amount of platform fees collected
+        fn get_platform_fees_collected(
+            self: @ContractState, campaign_id: u64, token_address: ContractAddress,
+        ) -> u256 {
+            self.platform_fees_collected.entry((campaign_id, token_address)).read()
+        }
+
+        /// @notice Update platform fee settings (admin only)
+        /// @param fee_percentage The new fee percentage (e.g., 250 = 2.5%)
+        /// @param fee_threshold The minimum campaign goal for fees
+        /// @param platform_wallet The wallet to receive platform fees
+        fn update_platform_fee_settings(
+            ref self: ContractState,
+            fee_percentage: u256,
+            fee_threshold: u256,
+            platform_wallet: ContractAddress,
+        ) {
+            assert(self.is_admin_or_owner(get_caller_address()), 'Not authorized');
+            assert(fee_percentage <= 1000, 'Fee too high (max 10%)');
+            assert(!platform_wallet.is_zero(), 'Invalid platform wallet');
+
+            self.platform_fee_percentage.write(fee_percentage);
+            self.platform_fee_threshold.write(fee_threshold);
+            self.platform_wallet.write(platform_wallet);
+        }
+
+        /// @notice Get current platform fee settings
+        /// @return (fee_percentage, fee_threshold, platform_wallet)
+        fn get_platform_fee_settings(self: @ContractState) -> (u256, u256, ContractAddress) {
+            (
+                self.platform_fee_percentage.read(),
+                self.platform_fee_threshold.read(),
+                self.platform_wallet.read(),
+            )
+        }
+
+        /// @notice Register token decimals for proper fee calculation
+        /// @param token_address The token contract address
+        /// @param decimals The number of decimals for the token (e.g., 6 for USDC, 18 for
+        /// ETH/STARK)
+        fn register_token_decimals(
+            ref self: ContractState, token_address: ContractAddress, decimals: u8,
+        ) {
+            assert(self.is_admin_or_owner(get_caller_address()), 'Not authorized');
+            assert(decimals <= 18, 'Invalid decimals');
+            self.token_decimals.entry(token_address).write(decimals);
+        }
+
+        /// @notice Get token decimals
+        /// @param token_address The token contract address
+        /// @return The number of decimals for the token (defaults to 18 if not registered)
+        fn get_token_decimals(self: @ContractState, token_address: ContractAddress) -> u8 {
+            let decimals = self.token_decimals.entry(token_address).read();
+            if decimals == 0 {
+                18 // Default to 18 decimals if not registered
+            } else {
+                decimals
+            }
+        }
+
 
         /// @notice Checks if the given address is an admin or owner of the contract
         /// @param address The address to check
@@ -635,6 +927,68 @@ pub mod Crowdchain {
             let caller = get_caller_address();
             assert(creator == caller, 'Caller is not the creator');
         }
+
+        /// @notice Calculate platform fee for a campaign with token decimal normalization
+        /// @param campaign_goal The campaign funding goal (normalized to 18 decimals)
+        /// @param total_funds The total funds raised in the specific token
+        /// @param token_address The token contract address for decimal lookup
+        /// @return The platform fee amount in the token's native decimals
+        fn _calculate_platform_fee(
+            self: @ContractState,
+            campaign_goal: u256,
+            total_funds: u256,
+            token_address: ContractAddress,
+        ) -> u256 {
+            // Get token decimals
+            let token_decimals = self.get_token_decimals(token_address);
+
+            // Normalize threshold to token decimals for comparison
+            let fee_threshold = self.platform_fee_threshold.read();
+            let normalized_threshold = if token_decimals < 18 {
+                fee_threshold / Pow::pow(10_u256, (18 - token_decimals).into())
+            } else {
+                fee_threshold * Pow::pow(10_u256, (token_decimals - 18).into())
+            };
+
+            // Check if campaign qualifies for platform fee (compare in token's native decimals)
+            let normalized_goal = if token_decimals < 18 {
+                campaign_goal / Pow::pow(10_u256, (18 - token_decimals).into())
+            } else {
+                campaign_goal * Pow::pow(10_u256, (token_decimals - 18).into())
+            };
+
+            if normalized_goal < normalized_threshold {
+                return 0;
+            }
+
+            // Calculate fee: (total_funds * fee_percentage) / 10000
+            let fee_percentage = self.platform_fee_percentage.read();
+            let fee_amount = (total_funds * fee_percentage) / 10000;
+
+            fee_amount
+        }
+
+        /// @notice Helper function to calculate power of 10
+        /// @param exponent The exponent
+        /// @return 10^exponent
+        fn pow(base: u256, exponent: u256) -> u256 {
+            if exponent == 0 {
+                return 1;
+            }
+            let mut result = 1;
+            let mut exp = exponent;
+            let mut b = base;
+            loop {
+                if exp % 2 == 1 {
+                    result = result * b;
+                }
+                exp = exp / 2;
+                if exp == 0 {
+                    break;
+                }
+                b = b * b;
+            }
+            result
+        }
     }
 }
-
